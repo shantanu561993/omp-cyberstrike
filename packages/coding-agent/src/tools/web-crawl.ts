@@ -1,7 +1,7 @@
 import { type } from "@oh-my-pi/omptype";
 import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-pi/pi-agent-core";
 import * as fs from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { appendLogEntry } from "../pentest/http-log";
 import { getPentestDir } from "../pentest/assets";
 import type { ToolSession } from "./index";
@@ -37,6 +37,33 @@ function crawlBundlePath(): string {
 		return join(getPentestDir(), "runtime", "crawl.mjs");
 	}
 	return join(import.meta.dir, "..", "..", "..", "hackbrowser", "dist", "crawl.mjs");
+}
+
+/**
+ * In compiled mode the staged runtime dir has no node_modules, so node cannot
+ * resolve the bundle's `playwright` import from the bundle location. Walk up
+ * from the binary path for a workspace node_modules that provides playwright
+ * and symlink it into the staged runtime dir (standalone binaries outside a
+ * checkout get a clear ToolError instead).
+ */
+function linkStagedBundleDeps(bundlePath: string): void {
+	const linkTarget = join(dirname(bundlePath), "node_modules");
+	if (fs.existsSync(linkTarget)) return;
+	let dir = dirname(process.execPath);
+	while (true) {
+		const nm = join(dir, "node_modules");
+		if (fs.existsSync(join(nm, "playwright"))) {
+			try {
+				fs.symlinkSync(nm, linkTarget, "dir");
+			} catch {
+				// symlink failed (e.g. permissions) — the spawn below will error clearly
+			}
+			return;
+		}
+		const parent = dirname(dir);
+		if (parent === dir) return;
+		dir = parent;
+	}
 }
 
 const webCrawlDescription = `LLM-navigated crawl of a web application (vendored CyberStrike hackbrowser). Visits the target, discovers links/forms, captures EVERY request/response to <out>/requests.jsonl (JSONL: method, url, path, status, raw request, response, pageUrl), and auto-logs each capture into <out>/http.log (source: "crawl"). Options: scope (in-scope hosts; defaults to the target host), steps (navigation budget, default 10), user/pass + selU/selP (auto-login on the discovered form), sessionOut (export the authenticated session to a per-role dir: session.json + cookies.txt Netscape jar + headers.json — usable by curl -b/-c and scanners --token-a), sessionIn (restore a previously exported session for a continuation crawl). Requires a DeepSeek/Anthropic/OpenAI key (env or the session auth store).`;
@@ -83,6 +110,14 @@ export class WebCrawlTool implements AgentTool<typeof webCrawlSchema, WebCrawlTo
 		const bundle = crawlBundlePath();
 		if (!fs.existsSync(bundle)) {
 			throw new ToolError(`crawl bundle not found: ${bundle} (build it with bun run build in packages/hackbrowser)`);
+		}
+		if (process.env.PI_COMPILED === "true") {
+			linkStagedBundleDeps(bundle);
+			if (!fs.existsSync(join(dirname(bundle), "node_modules"))) {
+				throw new ToolError(
+					"web_crawl in the compiled binary needs a workspace node_modules with playwright reachable from the binary (run the binary from inside the checkout)",
+				);
+			}
 		}
 
 		const args = ["--url", params.url];

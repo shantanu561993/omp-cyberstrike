@@ -162,8 +162,29 @@ export async function collectBundledPiEntries(): Promise<BundledPiEntry[]> {
 					const basename = match.slice(0, match.length - pattern.sourceSuffix.length);
 					const segments = basename.split("/");
 					// Every directory on the way has to be importable too: a private or
-					// hidden folder is no more exported than a private file.
-					if (segments.some(segment => segment.startsWith(".") || segment.startsWith("_"))) continue;
+					// hidden folder is no more exported than a private file. The
+					// `pentest` capability tree (embedded skills, methodology/http-log
+					// modules, staged assets) and the pentest-builtin tool modules are
+					// internal source — not a legacy Pi API surface — so they stay out
+					// of the wildcard registry: their compile embedding would otherwise
+					// interop-conflict with the static named-import graph (the compiled
+					// legacy loader wrapper reports missing named/default exports).
+					if (
+						segments.some(
+							segment =>
+								segment.startsWith(".") ||
+								segment.startsWith("_") ||
+								segment === "pentest" ||
+								segment === "attack-script" ||
+								segment === "http-log" ||
+								segment === "methodology" ||
+								segment === "web-crawl" ||
+								segment === "session-bot" ||
+								segment === "bolt" ||
+								segment === "bolt-status",
+						)
+					)
+						continue;
 					if (!isSafeWildcardBasename(segments.at(-1) ?? "")) continue;
 					const subpath = `${pattern.exportPrefix}${basename}${pattern.exportSuffix}`;
 					const key = `${manifest.name}/${subpath}`;
