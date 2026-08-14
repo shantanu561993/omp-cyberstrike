@@ -42,6 +42,8 @@ import { AttackScriptTool } from "./attack-script";
 import { AstEditTool } from "./ast-edit";
 import { AstGrepTool } from "./ast-grep";
 import { BashTool } from "./bash";
+import { BoltStatusTool } from "./bolt-status";
+import { BoltTool } from "./bolt";
 import { BrowserTool } from "./browser";
 import { type BuiltinToolName, type HiddenToolName, normalizeToolNames } from "./builtin-names";
 import { type CheckpointState, CheckpointTool, type CompletedRewindState, RewindTool } from "./checkpoint";
@@ -453,6 +455,8 @@ export const BUILTIN_TOOLS: Record<BuiltinToolName, ToolFactory> = {
 	methodology: s => new MethodologyTool(s),
 	web_crawl: s => new WebCrawlTool(s),
 	session_bot: s => new SessionBotTool(s),
+	bolt: s => new BoltTool(s),
+	bolt_status: s => new BoltStatusTool(s),
 };
 
 export const HIDDEN_TOOLS: Record<HiddenToolName, ToolFactory> = {

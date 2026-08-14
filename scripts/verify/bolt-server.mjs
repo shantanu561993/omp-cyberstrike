@@ -8,13 +8,37 @@
 //   --rotate             regenerate the server keypair on start (pairing invalidated)
 import http from "node:http";
 import crypto from "node:crypto";
+import fs from "node:fs";
 
 const ADMIN_TOKEN = "test-admin-token";
 const PORT = Number(process.env.PORT ?? process.argv[2] ?? 8091);
+// Keypair persists across restarts (rotated only with --rotate): a restart
+// must not invalidate an existing pairing.
+const KEY_FILE = process.env.BOLT_KEY_FILE ?? "/work/verify/bolt-mock-key.json";
+const rotate = process.argv.includes("--rotate");
 
-const { publicKey: serverKey, privateKey: serverPriv } = crypto.generateKeyPairSync("ed25519");
-const serverPublicKeyPem = serverKey.export({ type: "spki", format: "pem" });
-const serverPrivateKeyPem = serverPriv.export({ type: "pkcs8", format: "pem" });
+let serverPublicKeyPem;
+let serverPrivateKeyPem;
+if (!rotate && fs.existsSync(KEY_FILE)) {
+	try {
+		const saved = JSON.parse(fs.readFileSync(KEY_FILE, "utf8"));
+		serverPublicKeyPem = saved.publicKeyPem;
+		serverPrivateKeyPem = saved.privateKeyPem;
+	} catch {
+		// corrupt — regenerate below
+	}
+}
+if (!serverPublicKeyPem) {
+	const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+	serverPublicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+	serverPrivateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+	try {
+		fs.mkdirSync(require("node:path").dirname(KEY_FILE), { recursive: true });
+		fs.writeFileSync(KEY_FILE, JSON.stringify({ publicKeyPem: serverPublicKeyPem, privateKeyPem: serverPrivateKeyPem }));
+	} catch {
+		// non-persistent run — pairing dies with the process
+	}
+}
 
 function fingerprint(pem) {
 	return crypto.createHash("sha256").update(pem).digest("hex").slice(0, 16);
@@ -23,6 +47,26 @@ const serverFingerprint = fingerprint(serverPublicKeyPem);
 
 const pairingCodes = new Map(); // code -> { expiresAt }
 const clients = new Map(); // clientId -> { publicKeyPem }
+
+// Persist the client registry alongside the keypair: a restart must not
+// invalidate existing pairings.
+function saveClients() {
+	try {
+		fs.mkdirSync(require("node:path").dirname(KEY_FILE), { recursive: true });
+		fs.writeFileSync(KEY_FILE.replace(/\.json$/, ".clients.json"), JSON.stringify([...clients.entries()]));
+	} catch {
+		// non-persistent run
+	}
+}
+function loadClients() {
+	try {
+		const saved = JSON.parse(fs.readFileSync(KEY_FILE.replace(/\.json$/, ".clients.json"), "utf8"));
+		for (const [id, client] of saved) clients.set(id, client);
+	} catch {
+		// none yet
+	}
+}
+loadClients();
 
 function verifySignature(req, rawBody) {
 	const clientId = req.headers["x-client-id"];
@@ -88,6 +132,7 @@ const server = http.createServer(async (req, res) => {
 		pairingCodes.delete(data.code);
 		const clientId = fingerprint(data.clientPublicKey);
 		clients.set(clientId, { publicKeyPem: data.clientPublicKey });
+		saveClients();
 		json(res, 200, { clientId, serverPublicKey: serverPublicKeyPem, serverFingerprint });
 		return;
 	}
@@ -118,7 +163,7 @@ const server = http.createServer(async (req, res) => {
 			const args = rpc.params?.arguments ?? {};
 			if (toolName === "bash") {
 				const command = String(args.command ?? "");
-				const out = (await new Promise((resolve) => {
+				const out = await new Promise((resolve) => {
 					import("node:child_process").then(({ execSync }) => {
 						try {
 							resolve({ ok: true, text: execSync(command, { encoding: "utf8", timeout: 10_000 }).toString() });
@@ -126,7 +171,7 @@ const server = http.createServer(async (req, res) => {
 							resolve({ ok: false, text: String(err.stderr ?? err.message) });
 						}
 					});
-				}))();
+				});
 				json(res, 200, { jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: out.text }], isError: !out.ok } });
 				return;
 			}

@@ -63,7 +63,7 @@ export interface MCPServer {
 		prompt?: string;
 	};
 	/** Transport type */
-	transport?: "stdio" | "sse" | "http";
+	transport?: "stdio" | "sse" | "http" | "bolt";
 	/** Source metadata (added by loader) */
 	_source: SourceMeta;
 }

@@ -81,6 +81,15 @@ function convertToLegacyConfig(server: MCPServer): MCPServerConfig {
 		return config;
 	}
 
+	if (transport === "bolt") {
+		const config: MCPServerConfig = {
+			...shared,
+			type: "bolt" as const,
+			url: server.url ?? "",
+		};
+		return config;
+	}
+
 	// Fallback to stdio
 	return {
 		...shared,
@@ -286,7 +295,7 @@ export function validateServerConfig(name: string, config: MCPServerConfig): str
 		if (!stdioConfig.command) {
 			errors.push(`Server "${name}": stdio server requires "command" field`);
 		}
-	} else if (serverType === "http" || serverType === "sse") {
+	} else if (serverType === "http" || serverType === "sse" || serverType === "bolt") {
 		const httpConfig = config as { url?: string };
 		if (!httpConfig.url) {
 			errors.push(`Server "${name}": ${serverType} server requires "url" field`);

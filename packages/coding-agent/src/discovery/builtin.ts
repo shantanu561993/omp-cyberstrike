@@ -6,6 +6,7 @@
 import * as path from "node:path";
 import { getAgentDir, logger, parseFrontmatter, tryParseJson } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
+import { Settings } from "../config/settings";
 import { getManagedSkillsDir, MANAGED_SKILLS_PROVIDER_ID } from "../autolearn/managed-skills";
 import { getPentestDir } from "../pentest/assets";
 import { registerProvider } from "../capability";
@@ -237,6 +238,44 @@ registerProvider<MCPServer>(mcpCapability.id, {
 	description: DESCRIPTION,
 	priority: PRIORITY,
 	load: loadMCPServers,
+});
+
+// Bolt (CyberStrike remote machines) — native MCP integration. One MCPServer
+// per enabled bolt.servers settings entry; unpaired servers fail to connect
+// (BoltNotPairedError) and contribute no tools until the `bolt` tool pairs them.
+const BOLT_PROVIDER_ID = "bolt";
+const BOLT_PROVIDER_PRIORITY = 50;
+async function loadBoltServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> {
+	const items: MCPServer[] = [];
+	const warnings: string[] = [];
+	try {
+		const settings = await Settings.init({ cwd: ctx.cwd });
+		const servers = settings.get("bolt.servers") as Record<string, { url: string; timeout?: number; enabled?: boolean }>;
+		for (const [name, entry] of Object.entries(servers ?? {})) {
+			if (!entry?.url) {
+				warnings.push(`bolt server "${name}": missing url — skipped`);
+				continue;
+			}
+			items.push({
+				name,
+				enabled: entry.enabled ?? true,
+				timeout: entry.timeout,
+				url: entry.url,
+				transport: "bolt",
+				_source: createSourceMeta(BOLT_PROVIDER_ID, "bolt.servers", "user"),
+			});
+		}
+	} catch (err) {
+		warnings.push(`failed to load bolt.servers: ${String(err)}`);
+	}
+	return { items, warnings };
+}
+registerProvider<MCPServer>(mcpCapability.id, {
+	id: BOLT_PROVIDER_ID,
+	displayName: "Bolt Servers",
+	description: "Native CyberStrike Bolt integration (bolt.servers settings)",
+	priority: BOLT_PROVIDER_PRIORITY,
+	load: loadBoltServers,
 });
 
 // System Prompt (SYSTEM.md)

@@ -132,7 +132,13 @@ export interface MCPSseServerConfig extends MCPServerConfigBase {
 	headerPolicy?: "origin-locked";
 }
 
-export type MCPServerConfig = MCPStdioServerConfig | MCPHttpServerConfig | MCPSseServerConfig;
+/** Bolt server configuration (native CyberStrike Bolt integration) */
+export interface MCPBoltServerConfig extends MCPServerConfigBase {
+	type: "bolt";
+	url: string;
+}
+
+export type MCPServerConfig = MCPStdioServerConfig | MCPHttpServerConfig | MCPSseServerConfig | MCPBoltServerConfig;
 
 export const MCP_CONFIG_SCHEMA_URL =
 	"https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json";

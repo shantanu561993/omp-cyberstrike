@@ -33,6 +33,8 @@ export const BUILTIN_TOOL_NAMES = [
 	"methodology",
 	"web_crawl",
 	"session_bot",
+	"bolt",
+	"bolt_status",
 ] as const;
 
 export type BuiltinToolName = (typeof BUILTIN_TOOL_NAMES)[number];

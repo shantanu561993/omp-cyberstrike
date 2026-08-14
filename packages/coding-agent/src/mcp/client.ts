@@ -7,6 +7,7 @@ import * as path from "node:path";
 import * as url from "node:url";
 import { getProjectDir, logger, withTimeout } from "@oh-my-pi/pi-utils";
 import { describeMCPTimeout, isMCPTimeoutEnabled, resolveMCPTimeoutMs } from "./timeout";
+import { createBoltTransport, BoltNotPairedError } from "./bolt";
 import { createHttpTransport } from "./transports/http";
 import { createSseTransport } from "./transports/sse";
 import { createStdioTransport } from "./transports/stdio";
@@ -26,6 +27,7 @@ import type {
 	MCPResourcesListResult,
 	MCPResourceTemplate,
 	MCPResourceTemplatesListResult,
+	MCPBoltServerConfig,
 	MCPServerCapabilities,
 	MCPServerConfig,
 	MCPServerConnection,
@@ -80,6 +82,11 @@ async function createTransport(config: MCPServerConfig): Promise<MCPTransport> {
 			return createHttpTransport(config as MCPHttpServerConfig);
 		case "sse":
 			return createSseTransport(config as MCPSseServerConfig);
+		case "bolt":
+			// Unpaired servers throw BoltNotPairedError — the manager records a
+			// failed connection and the server contributes no tools until the
+			// `bolt` tool pairs it.
+			return createBoltTransport(config as MCPBoltServerConfig);
 		default:
 			throw new Error(`Unknown server type: ${serverType}`);
 	}

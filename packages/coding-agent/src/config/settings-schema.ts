@@ -316,6 +316,14 @@ export interface ModelTagsSettings {
 // under `as const` while still letting SettingValue infer the correct element type.
 const EMPTY_STRING_ARRAY: string[] = [];
 const EMPTY_STRING_RECORD: Record<string, string> = {};
+
+/** bolt.servers entry: { url, timeout?, enabled? } */
+export interface BoltServerEntry {
+	url: string;
+	timeout?: number;
+	enabled?: boolean;
+}
+const EMPTY_BOLT_SERVERS_RECORD: Record<string, BoltServerEntry> = {};
 const EMPTY_NUMBER_RECORD: Record<string, number> = {};
 const DEFAULT_CYCLE_ORDER: string[] = ["smol", "default", "slow"];
 const DEFAULT_TOOL_CALL_LOOP_EXEMPT_TOOLS: string[] = ["hub"];
@@ -4372,6 +4380,19 @@ export const SETTINGS_SCHEMA = {
 			label: "MCP Notification Debounce",
 			description:
 				"Debounce window in milliseconds for MCP resource updates before injecting them into the conversation",
+		},
+	},
+
+	// Bolt (CyberStrike remote machines, native integration)
+	"bolt.servers": {
+		type: "record",
+		default: EMPTY_BOLT_SERVERS_RECORD,
+		ui: {
+			tab: "tools",
+			group: "Discovery & MCP",
+			label: "Bolt Servers",
+			description:
+				"Bolt remote machines: key = server name, value = { url, timeout?, enabled? }. Each enabled entry becomes an MCP server (bolt_<name>_<tool> tools) once paired via the bolt tool.",
 		},
 	},
 
