@@ -145,7 +145,7 @@ jobs:
    # release. A skipped required check still satisfies branch protection.
    rust_validate:
       name: Validate Rust workspace (bazel)
-      if: github.event_name != 'pull_request'
+      if: github.event_name != 'pull_request' && github.repository == 'can1357/oh-my-pi'
       runs-on: ${{ github.repository == 'can1357/oh-my-pi' && 'omp-kata' || 'ubuntu-22.04' }}
       steps:
          - uses: actions/checkout@v4
@@ -198,7 +198,7 @@ jobs:
 
          # ---- PR path: latest release addons from npm ----
          - name: Fetch release native addons (npm)
-           if: github.event_name == 'pull_request'
+           if: github.event_name == 'pull_request' || github.repository != 'can1357/oh-my-pi'
            shell: bash
            run: |
               set -euo pipefail
@@ -211,7 +211,7 @@ jobs:
          # A corrupt download must fail here, not as a confusing dlopen error
          # in every downstream test shard.
          - name: Smoke release addons
-           if: github.event_name == 'pull_request'
+           if: github.event_name == 'pull_request' || github.repository != 'can1357/oh-my-pi'
            shell: bash
            run: |
               set -euo pipefail
@@ -236,7 +236,7 @@ jobs:
          # leaving a reviewer to wonder which addons the tests exercised.
          # Best-effort: a diff-API failure must not fail the job over a notice.
          - name: Note native changes tested against release addons
-           if: github.event_name == 'pull_request'
+           if: github.event_name == 'pull_request' || github.repository != 'can1357/oh-my-pi'
            shell: bash
            env:
               GH_TOKEN: ${{ github.token }}
@@ -248,12 +248,12 @@ jobs:
 
          # ---- main path: bazel build of all Linux-hosted targets ----
          - id: cache
-           if: github.event_name != 'pull_request'
+           if: github.event_name != 'pull_request' && github.repository == 'can1357/oh-my-pi'
            uses: ./.github/actions/bazel-cache
            with:
               scope: linux
          - name: Build native addons once
-           if: github.event_name != 'pull_request'
+           if: github.event_name != 'pull_request' && github.repository == 'can1357/oh-my-pi'
            run: |
               set -eo pipefail
               if [ "$(ulimit -Sn)" != unlimited ] && [ "$(ulimit -Sn)" -lt 65536 ]; then ulimit -Sn 65536 || true; fi
@@ -281,7 +281,7 @@ jobs:
          # thousands of actions is the failure mode that made CI slow — make
          # it visible in the run summary instead of discovering it weeks in.
          - name: Report bazel cache stats
-           if: github.event_name != 'pull_request'
+           if: github.event_name != 'pull_request' && github.repository == 'can1357/oh-my-pi'
            shell: bash
            run: |
               # Bazel runs with --color=yes (config=ci); strip ANSI before
@@ -451,7 +451,7 @@ jobs:
    # in parallel with the test fan-out and only publishing is held back.
    release_gate:
       name: Release validation gate
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
+      if: ${{ github.repository == 'can1357/oh-my-pi' && needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.rust_validate.result == 'success' &&
          needs.native_addons.result == 'success' &&
          needs.test_workspace.result == 'success' &&
@@ -474,7 +474,7 @@ jobs:
    # GitHub release, core npm) is gated on release_gate downstream.
    release_binary:
       name: "Release binary: ${{ matrix.target_id }}"
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
+      if: ${{ github.repository == 'can1357/oh-my-pi' && needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.native_addons.result == 'success' }}
       needs: [release_metadata, native_addons]
       strategy:
@@ -580,7 +580,7 @@ jobs:
    # moment the release run is detected, fully overlapped with the tests.
    release_binary_darwin:
       name: "Release binary: ${{ matrix.target_id }}"
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() }}
+      if: ${{ github.repository == 'can1357/oh-my-pi' && needs.release_metadata.outputs.is-release == 'true' && !cancelled() }}
       needs: [release_metadata]
       strategy:
          fail-fast: false
@@ -666,7 +666,7 @@ jobs:
    # packages/natives/native), so no per-platform runners are needed.
    release_native_leaves:
       name: Publish native leaf packages
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
+      if: ${{ github.repository == 'can1357/oh-my-pi' && needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_gate.result == 'success' &&
          needs.release_binary.result == 'success' &&
          needs.release_binary_darwin.result == 'success' &&
@@ -725,7 +725,7 @@ jobs:
 
    release_github:
       name: Publish GitHub release
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
+      if: ${{ github.repository == 'can1357/oh-my-pi' && needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_gate.result == 'success' &&
          needs.release_binary.result == 'success' &&
          needs.release_binary_darwin.result == 'success' }}
@@ -778,7 +778,7 @@ jobs:
 
    release_github_verify:
       name: Verify published release (macOS)
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
+      if: ${{ github.repository == 'can1357/oh-my-pi' && needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_github.result == 'success' }}
       needs: [release_metadata, release_github]
       runs-on: macos-14
@@ -812,7 +812,7 @@ jobs:
 
    release_npm:
       name: Publish to npm
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
+      if: ${{ github.repository == 'can1357/oh-my-pi' && needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_binary.result == 'success' &&
          needs.release_binary_darwin.result == 'success' &&
          needs.release_github_verify.result == 'success' &&
@@ -870,7 +870,7 @@ jobs:
    # release never blocks on tap access.
    release_brew:
       name: Update Homebrew tap
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
+      if: ${{ github.repository == 'can1357/oh-my-pi' && needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_github_verify.result == 'success' }}
       needs: [release_metadata, release_github_verify]
       runs-on: ubuntu-22.04

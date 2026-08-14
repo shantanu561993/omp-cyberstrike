@@ -65,6 +65,7 @@ jobs:
    # image, and target must stay in lockstep with the release_binary matrix
    # in ci.yml — a mismatched scope warms an archive nobody restores.
    warm_darwin:
+      if: github.repository == 'can1357/oh-my-pi'
       name: "Seed darwin release bazel cache: ${{ matrix.target }}"
       strategy:
          fail-fast: false
@@ -90,6 +91,7 @@ jobs:
    # half only runs on non-PR events, and main CI jobs run on omp-kata (PVC
    # store, no GitHub cache), so this is the sole hosted-runner producer.
    warm_bun:
+      if: github.repository == 'can1357/oh-my-pi'
       name: Seed bun store cache
       runs-on: ubuntu-22.04
       steps:

@@ -47,6 +47,7 @@ permissions:
 
 jobs:
   evaluate:
+    if: github.repository == 'can1357/oh-my-pi'
     name: Evaluate flake
     runs-on: ubuntu-22.04
     steps:
