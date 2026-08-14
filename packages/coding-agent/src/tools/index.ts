@@ -66,6 +66,7 @@ import { wrapToolWithMetaNotice } from "./output-meta";
 import { ReadTool } from "./read";
 import type { PlanProposalHandler } from "./resolve";
 import { SecurityScanTool } from "./security-scan";
+import { SessionBotTool } from "./session-bot";
 import { supportsExternalThinking, ThinkTool } from "./think";
 import { type TodoPhase, TodoTool } from "./todo";
 import { WriteTool } from "./write";
@@ -451,6 +452,7 @@ export const BUILTIN_TOOLS: Record<BuiltinToolName, ToolFactory> = {
 	http_log: s => new HttpLogTool(s),
 	methodology: s => new MethodologyTool(s),
 	web_crawl: s => new WebCrawlTool(s),
+	session_bot: s => new SessionBotTool(s),
 };
 
 export const HIDDEN_TOOLS: Record<HiddenToolName, ToolFactory> = {

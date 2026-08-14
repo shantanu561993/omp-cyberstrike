@@ -20,6 +20,7 @@ export const TOOL_TIMEOUTS = {
 	http_log: { default: 10, min: 1, max: 60 },
 	methodology: { default: 10, min: 1, max: 60 },
 	web_crawl: { default: 300, min: 1, max: 900 },
+	session_bot: { default: 10, min: 1, max: 60 },
 } as const satisfies Record<string, ToolTimeoutConfig>;
 
 export type ToolWithTimeout = keyof typeof TOOL_TIMEOUTS;
