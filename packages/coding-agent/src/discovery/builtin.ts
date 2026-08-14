@@ -7,6 +7,7 @@ import * as path from "node:path";
 import { getAgentDir, logger, parseFrontmatter, tryParseJson } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { getManagedSkillsDir, MANAGED_SKILLS_PROVIDER_ID } from "../autolearn/managed-skills";
+import { getPentestDir } from "../pentest/assets";
 import { registerProvider } from "../capability";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
 import { type Extension, type ExtensionManifest, extensionCapability } from "../capability/extension";
@@ -334,6 +335,30 @@ registerProvider<Skill>(skillCapability.id, {
 	description: "Auto-generated managed skills from ~/.omp/agent/managed-skills",
 	priority: MANAGED_SKILLS_PRIORITY,
 	load: loadManagedSkills,
+});
+
+// Embedded web-pentest skills (packages/coding-agent/src/pentest/skills) ship in
+// source as a separate provider at the same low priority as managed skills, so an
+// authored skill of the same name from any other provider wins. The 142 ported
+// CyberStrike skills are `hide: true` (never auto-injected; loaded on demand via
+// skill://); only the `web-pentest` umbrella is visible. In PI_COMPILED builds the
+// files resolve from the staged asset dir (see src/pentest/assets.ts).
+const PENTEST_SKILLS_PROVIDER_ID = "pentest";
+const PENTEST_SKILLS_PRIORITY = 5;
+async function loadPentestSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
+	return scanSkillsFromDir(ctx, {
+		dir: path.join(getPentestDir(), "skills"),
+		providerId: PENTEST_SKILLS_PROVIDER_ID,
+		level: "user",
+		requireDescription: true,
+	});
+}
+registerProvider<Skill>(skillCapability.id, {
+	id: PENTEST_SKILLS_PROVIDER_ID,
+	displayName: "Pentest (embedded)",
+	description: "Embedded web application pentest skills (OWASP WSTG 4.2 + attack playbooks)",
+	priority: PENTEST_SKILLS_PRIORITY,
+	load: loadPentestSkills,
 });
 
 // Slash Commands
