@@ -37,11 +37,16 @@ const server = http.createServer((req, res) => {
 	if (method === "GET" && url.pathname === "/") {
 		res.writeHead(200, { "Content-Type": "text/html" });
 		res.end(`<html><body><h1>pentest-fixture</h1>
+<form method="GET" action="/search">
+  <input type="text" name="q" placeholder="search..." />
+  <button type="submit">Search</button>
+</form>
 <form method="POST" action="/login">
   <input type="text" name="username" />
   <input type="password" name="password" />
   <button type="submit">Sign in</button>
 </form>
+<p>API: <a href="/api/user/1">/api/user/1</a> · <a href="/api/admin">/api/admin</a> · <a href="/api/me">/api/me</a> · <a href="/api/cors">/api/cors</a> · <a href="/search?q=test">/search?q=test</a></p>
 <a href="/login">login</a></body></html>`);
 		return;
 	}
