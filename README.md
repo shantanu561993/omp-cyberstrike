@@ -32,6 +32,106 @@ The most capable agent surface that ships. Continuously tuned by real-world use 
 > while we evaluate how open contributions go. Depending on the results, the
 > vouch system may return.
 
+---
+
+# omp-cyberstrike — Web Pentest Edition
+
+This fork of **oh-my-pi** engraves a **web-application penetration-testing
+capability** into the source itself — native OMP code, nothing built on top.
+The capability is ported from [CyberStrike](https://github.com/CyberStrikeus/CyberStrike)
+(OWASP WSTG 4.2 methodology + attack playbooks + HackBrowser crawler + Bolt
+remote-execution protocol), re-implemented as in-tree OMP features:
+
+| Feature | Where | What it does |
+|---|---|---|
+| 143 embedded skills (142 hidden + `web-pentest` umbrella) | `packages/coding-agent/src/pentest/skills/` | OWASP WSTG 4.2 checklist + attack playbooks, loaded on demand via `skill://` (small-context friendly: nothing auto-injected) |
+| 16 attack scanners | `src/pentest/scanners/` | cors_checker, idor_tester, ssti_tester, ssrf_listener, jwt_tamper, … via the `attack_script` tool |
+| 7 built-in tools | `tools/` | `attack_script`, `methodology`, `web_crawl`, `bolt`, `bolt_status`, `http_log`, `session_bot` |
+| Vendored crawler | `packages/hackbrowser/` (AGPL, attributed) | LLM-navigated crawl with full HTTP capture, **session export** (Netscape jar + auth headers) |
+| Session-guardian bot | `packages/hackbrowser/session-bot.ts` | Keeps exported sessions alive: probes every 15 s, detects death (non-2xx / content-length drift), re-authenticates, atomically refreshes the jar |
+| 13-phase methodology state machine | `src/pentest/methodology.ts` | CyberStrike phase order, prerequisite enforcement, WSTG coverage audit |
+| Native Bolt MCP transport | `src/mcp/bolt.ts` | Ed25519 pairing + signed JSON-RPC over HTTP; remote machines expose `mcp__<server>_<tool>` tools; verified against the real `ghcr.io/cyberstrikeus/bolt:latest` |
+| Bundled commands + agent | `src/prompts/agents/` | `/pentest <url>` (deterministic intake, scanner sweep + 13 phase workers with budget/handover, coverage report) and `/bolt` (pair/list/run/…), `web-pentester` agent with structured yields |
+| All-traffic audit log | `src/pentest/http-log.ts` | `<out>/http.log` JSONL index + deduped body store; tool-capped lookback (nothing auto-injected into prompts) |
+
+## The pentest pipeline (`/pentest <url>`)
+
+1. **Deterministic intake** — 20-field questionnaire resolved by precedence:
+   CLI flags → `--config` (`.pentest.yaml`) → ask (interactive, two batches) → defaults.
+2. **Crawl** (optional) — `web_crawl` captures every request; authenticated
+   sessions are exported per account and guarded by session bots.
+3. **Tier 1 sweep** — every applicable scanner runs against all captured endpoints (`<out>/sweep/<scanner>.log`).
+4. **Tier 2 phases** — one `web-pentester` worker per methodology phase, fixed
+   action budget (`--phase-budget N`), structured handover relay, findings
+   ledger `F<seq>` append-only, `methodology` coverage audit, `report.md` with
+   coverage + findings tables.
+5. **Audit** — every HTTP interaction lands in `<out>/http.log`; bodies in
+   `<out>/responses/`; all state survives compaction (files are the memory).
+
+## Docker-first execution
+
+Per project mandate, **everything runs in Docker** — builds, harness sessions,
+fixtures, crawler. The host only runs `docker` and stores files via bind mounts.
+
+```sh
+# Build the dev image (bun 1.3.14 + python3 + node + pinned chromium-1208 baked in)
+docker build -f Dockerfile.dev -t omp-pentest-dev .
+
+# Run the harness (print mode)
+docker run --rm --network omp-pentest \
+  -v /path/to/omp-cyberstrike:/work/omp-cyberstrike \
+  -v /path/to/verify:/work/verify \
+  -e DEEPSEEK_API_KEY=... -w /work/verify omp-pentest-dev \
+  bun --cwd=/work/omp-cyberstrike/packages/coding-agent src/cli.ts \
+  --api-key ... --model deepseek/deepseek-v4-flash -p "..."
+
+# Interactive TUI: same command without -p, with -it
+```
+
+Key env: `DEEPSEEK_API_KEY` (crawler + harness); the agent dir
+(`~/.omp/agent`) is container-local unless mounted; persistent artifacts go to
+`/work/verify`. `docker network create omp-pentest` once; fixtures
+(`scripts/verify/server.mjs`, `bolt-server.mjs`) run as containers on it.
+
+## Building
+
+```sh
+# In the image/container:
+bun install                                   # workspace deps
+bun scripts/port-cyberstrike-skills.ts ...    # re-port skills/scanners (idempotent)
+bun scripts/gen-pentest-assets.ts             # regenerate src/pentest/assets.ts (run after hackbrowser bundle builds)
+bun --cwd=packages/hackbrowser run build      # crawl.mjs + session-bot.mjs bundles (committed)
+cd packages/coding-agent && bun run build     # dist/omp compiled binary (Linux)
+```
+
+The compiled binary is self-contained for skills/scanners/crawl (assets staged
+from `PI_COMPILED`); crawling additionally needs a workspace `node_modules`
+with playwright reachable from the binary (linked automatically when the
+binary runs inside a checkout).
+
+## Updating from upstream
+
+```sh
+git remote add upstream https://github.com/can1357/oh-my-pi
+git fetch upstream && git rebase upstream/main
+```
+
+The pentest surface is almost entirely new files, so rebases are usually
+conflict-free; when the version bumps, re-materialize the pi-natives addons
+(run the matching `omp-linux-x64` release binary once and copy the extracted
+`.node` into `packages/natives/native/`), `bun install`, rebuild. **Never
+push this branch upstream** — the ported CyberStrike content is AGPL and must
+stay copy-local (see `packages/coding-agent/src/pentest/ATTRIBUTION.md` and
+`packages/hackbrowser/ATTRIBUTION.md`).
+
+## Authorized use only
+
+The pentest tooling runs active security testing. Use it exclusively against
+targets you are authorized to test; `/pentest` enforces an authorization gate
+before any request.
+
+---
+
 ## Install
 
 **macOS · Linux**
