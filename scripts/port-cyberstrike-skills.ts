@@ -362,7 +362,8 @@ function main(argv: readonly string[]): void {
 		copiedScanners++;
 	}
 
-	// INDEX.md + ATTRIBUTION.md at the pentest root.
+	// INDEX.md + ATTRIBUTION.md at the pentest root AND inside the umbrella
+	// skill dir (so skill://web-pentest/INDEX.md resolves for workers).
 	writeFileSync(join(pentestRoot, "INDEX.md"), renderIndex(skills, src));
 	const commit = gitCommit(csRoot); // CyberStrike repo root
 	const attribution = `# Attribution & Licensing — ported Web Pentest content
@@ -399,6 +400,12 @@ repository:
 Ported content MUST NOT be upstreamed into \`can1357/oh-my-pi\` without relicensing.
 `;
 	writeFileSync(join(pentestRoot, "ATTRIBUTION.md"), attribution);
+	// Mirror both into the umbrella skill dir so skill://web-pentest/INDEX.md
+	// and skill://web-pentest/ATTRIBUTION.md resolve (workers read them there).
+	const umbrellaDir = join(dst, "web-pentest");
+	mkdirSync(umbrellaDir, { recursive: true });
+	writeFileSync(join(umbrellaDir, "INDEX.md"), renderIndex(skills, src));
+	writeFileSync(join(umbrellaDir, "ATTRIBUTION.md"), attribution);
 
 	console.log(`Ported ${skills.length} skills from ${src} to ${dst}`);
 	console.log(`  WSTG: ${skills.filter((s) => s.name.startsWith("wstg-")).length}, attack: ${skills.filter((s) => s.name.startsWith("attack-")).length}, recon: ${skills.filter((s) => s.name === "recon-methodology").length}`);
