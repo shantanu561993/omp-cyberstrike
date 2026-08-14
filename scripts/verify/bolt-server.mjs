@@ -9,6 +9,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 
 const ADMIN_TOKEN = "test-admin-token";
 const PORT = Number(process.env.PORT ?? process.argv[2] ?? 8091);
@@ -33,7 +34,7 @@ if (!serverPublicKeyPem) {
 	serverPublicKeyPem = publicKey.export({ type: "spki", format: "pem" });
 	serverPrivateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
 	try {
-		fs.mkdirSync(require("node:path").dirname(KEY_FILE), { recursive: true });
+		fs.mkdirSync(path.dirname(KEY_FILE), { recursive: true });
 		fs.writeFileSync(KEY_FILE, JSON.stringify({ publicKeyPem: serverPublicKeyPem, privateKeyPem: serverPrivateKeyPem }));
 	} catch {
 		// non-persistent run — pairing dies with the process
@@ -52,7 +53,7 @@ const clients = new Map(); // clientId -> { publicKeyPem }
 // invalidate existing pairings.
 function saveClients() {
 	try {
-		fs.mkdirSync(require("node:path").dirname(KEY_FILE), { recursive: true });
+		fs.mkdirSync(path.dirname(KEY_FILE), { recursive: true });
 		fs.writeFileSync(KEY_FILE.replace(/\.json$/, ".clients.json"), JSON.stringify([...clients.entries()]));
 	} catch {
 		// non-persistent run
