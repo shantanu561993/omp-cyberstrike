@@ -56,6 +56,7 @@ import { HttpLogTool } from "./http-log";
 import { InspectImageTool } from "./inspect-image";
 import { LearnTool } from "./learn";
 import { ManageSkillTool } from "./manage-skill";
+import { MethodologyTool } from "./methodology";
 import { MemoryEditTool } from "./memory-edit";
 import { MemoryRecallTool } from "./memory-recall";
 import { MemoryReflectTool } from "./memory-reflect";
@@ -447,6 +448,7 @@ export const BUILTIN_TOOLS: Record<BuiltinToolName, ToolFactory> = {
 	manage_skill: ManageSkillTool.createIf,
 	attack_script: s => new AttackScriptTool(s),
 	http_log: s => new HttpLogTool(s),
+	methodology: s => new MethodologyTool(s),
 };
 
 export const HIDDEN_TOOLS: Record<HiddenToolName, ToolFactory> = {

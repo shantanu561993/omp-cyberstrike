@@ -18,6 +18,7 @@ export const TOOL_TIMEOUTS = {
 	debug: { default: 30, min: 5, max: 300 },
 	attack_script: { default: 120, min: 1, max: 600 },
 	http_log: { default: 10, min: 1, max: 60 },
+	methodology: { default: 10, min: 1, max: 60 },
 } as const satisfies Record<string, ToolTimeoutConfig>;
 
 export type ToolWithTimeout = keyof typeof TOOL_TIMEOUTS;

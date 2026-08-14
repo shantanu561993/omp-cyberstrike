@@ -30,6 +30,7 @@ export const BUILTIN_TOOL_NAMES = [
 	"manage_skill",
 	"attack_script",
 	"http_log",
+	"methodology",
 ] as const;
 
 export type BuiltinToolName = (typeof BUILTIN_TOOL_NAMES)[number];
