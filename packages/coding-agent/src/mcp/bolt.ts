@@ -207,6 +207,9 @@ export class BoltTransport implements MCPTransport {
 	onRequest?: (method: string, params: unknown) => Promise<unknown>;
 
 	private idCounter = 1;
+	/** MCP streamable-HTTP session affinity: the server issues an Mcp-Session-Id in the
+	 * initialize response and requires it on every subsequent request. */
+	private sessionId: string | undefined;
 
 	constructor(
 		private readonly creds: BoltCredentials,
@@ -227,11 +230,15 @@ export class BoltTransport implements MCPTransport {
 			headers: {
 				"Content-Type": "application/json",
 				Accept: "application/json, text/event-stream",
+				...(this.sessionId ? { "Mcp-Session-Id": this.sessionId } : {}),
 				...headers,
 			},
 			body,
 			signal: AbortSignal.timeout(this.config.timeout ?? DEFAULT_TIMEOUT_MS),
 		});
+		// Session affinity: remember the server-issued session id (initialize response).
+		const issuedSession = res.headers.get("mcp-session-id");
+		if (issuedSession) this.sessionId = issuedSession;
 		if (!res.ok) {
 			const text = await res.text().catch(() => "");
 			throw new Error(`bolt ${this.config.url} responded ${res.status}: ${text.slice(0, 500)}`);
@@ -273,7 +280,7 @@ export class BoltTransport implements MCPTransport {
 		const headers = signRequest(this.creds, "POST", url.pathname + url.search, body);
 		await fetch(url, {
 			method: "POST",
-			headers: { "Content-Type": "application/json", ...headers },
+			headers: { "Content-Type": "application/json", ...(this.sessionId ? { "Mcp-Session-Id": this.sessionId } : {}), ...headers },
 			body,
 			signal: AbortSignal.timeout(this.config.timeout ?? DEFAULT_TIMEOUT_MS),
 		}).catch(() => {});

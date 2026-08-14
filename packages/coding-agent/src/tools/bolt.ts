@@ -139,8 +139,8 @@ export class BoltTool implements AgentTool<typeof boltSchema, BoltToolDetails> {
 				}
 				try {
 					await transport.request("initialize", {
-						protocolVersion: "2024-11-05",
-						capabilities: {},
+						protocolVersion: "2025-11-25",
+						capabilities: { roots: { listChanged: false } },
 						clientInfo: { name: "omp", version: "1.0.0" },
 					});
 					if (params.action === "tools") {
@@ -165,10 +165,22 @@ export class BoltTool implements AgentTool<typeof boltSchema, BoltToolDetails> {
 						toolName = params.tool;
 						args = params.jsonArgs ? (JSON.parse(params.jsonArgs) as Record<string, unknown>) : {};
 					}
-					const result = await transport.request<{
+					let result = await transport.request<{
 						content?: Array<{ type: string; text?: string }>;
 						isError?: boolean;
 					}>("tools/call", { name: toolName, arguments: args });
+					// Real Bolt servers expose run_command instead of bash: fall back
+					// when the server reports the bash tool as unknown.
+					if (params.action === "run" && result.isError) {
+						const errText = (result.content ?? []).map((c) => c.text ?? "").join("\n");
+						if (/unknown tool|tool not found/i.test(errText)) {
+							result = await transport.request<{
+								content?: Array<{ type: string; text?: string }>;
+								isError?: boolean;
+							}>("tools/call", { name: "run_command", arguments: { command: params.command } });
+							toolName = "run_command";
+						}
+					}
 					const text = (result.content ?? [])
 						.map((c) => (c.type === "text" ? (c.text ?? "") : JSON.stringify(c)))
 						.join("\n");
