@@ -1,37 +1,37 @@
 import type {
-  RawElement,
-  GlobalState,
-  IntelligenceState,
-  PageState,
-  ActionRecord,
-  ActionResult,
-  DeferredAuthPage,
-} from "./types.ts"
+	ActionRecord,
+	ActionResult,
+	DeferredAuthPage,
+	GlobalState,
+	IntelligenceState,
+	PageState,
+	RawElement,
+} from "./types.ts";
 
 // ============================================================
 // Constants
 // ============================================================
 
-const MAX_ACTIONS_IN_PROMPT = 10
-const MAX_FAILED_ELEMENTS = 20
+const MAX_ACTIONS_IN_PROMPT = 10;
+const MAX_FAILED_ELEMENTS = 20;
 
 // ============================================================
 // State factories
 // ============================================================
 
 export function createGlobalState(opts?: { outOfScope?: readonly string[] }): GlobalState {
-  return {
-    visitedPages: new Set(),
-    capturedEndpoints: new Set(),
-    authPhase: "anonymous",
-    totalSteps: 0,
-    pageQueue: [],
-    deferredAuthPages: [],
-    pendingReDiscovery: false,
-    pathPatternCounts: new Map(),
-    outOfScope: opts?.outOfScope ?? [],
-    intelligenceByCredential: new Map(),
-  }
+	return {
+		visitedPages: new Set(),
+		capturedEndpoints: new Set(),
+		authPhase: "anonymous",
+		totalSteps: 0,
+		pageQueue: [],
+		deferredAuthPages: [],
+		pendingReDiscovery: false,
+		pathPatternCounts: new Map(),
+		outOfScope: opts?.outOfScope ?? [],
+		intelligenceByCredential: new Map(),
+	};
 }
 
 // ============================================================
@@ -43,23 +43,23 @@ export function createGlobalState(opts?: { outOfScope?: readonly string[] }): Gl
  * uses the credential's declared label instead. Both share the same API,
  * differing only by which IntelligenceState entry is addressed.
  */
-export const SINGLE_CRED = "__single__"
+export const SINGLE_CRED = "__single__";
 
 /**
  * Get (or lazily create) the intelligence state for a credential.
  * Callers pass SINGLE_CRED in single-cred mode, the credential id otherwise.
  */
 export function getIntelligence(state: GlobalState, credId: string): IntelligenceState {
-  let intel = state.intelligenceByCredential.get(credId)
-  if (!intel) {
-    intel = {
-      emptyStateQueue: new Map(),
-      revisitCount: new Map(),
-      pageFingerprints: new Map(),
-    }
-    state.intelligenceByCredential.set(credId, intel)
-  }
-  return intel
+	let intel = state.intelligenceByCredential.get(credId);
+	if (!intel) {
+		intel = {
+			emptyStateQueue: new Map(),
+			revisitCount: new Map(),
+			pageFingerprints: new Map(),
+		};
+		state.intelligenceByCredential.set(credId, intel);
+	}
+	return intel;
 }
 
 // ============================================================
@@ -67,10 +67,10 @@ export function getIntelligence(state: GlobalState, credId: string): Intelligenc
 // ============================================================
 
 /** Maximum revisits per URL — combined with fingerprint skip, loops are impossible. */
-export const MAX_REVISITS_PER_URL = 2
+export const MAX_REVISITS_PER_URL = 2;
 
 /** Wildcard keyword — URL drains on any successful mutation (legacy/fallback). */
-export const ANY_MUTATION = "*"
+export const ANY_MUTATION = "*";
 
 /**
  * Mark a URL for revisit after a mutation, scoped to a credential.
@@ -78,11 +78,11 @@ export const ANY_MUTATION = "*"
  * @returns true if queued, false if rejected by hard limit.
  */
 export function markPageEmpty(state: GlobalState, credId: string, url: string, expectedMutation?: string): boolean {
-  const intel = getIntelligence(state, credId)
-  const count = intel.revisitCount.get(url) ?? 0
-  if (count >= MAX_REVISITS_PER_URL) return false
-  intel.emptyStateQueue.set(url, expectedMutation ?? ANY_MUTATION)
-  return true
+	const intel = getIntelligence(state, credId);
+	const count = intel.revisitCount.get(url) ?? 0;
+	if (count >= MAX_REVISITS_PER_URL) return false;
+	intel.emptyStateQueue.set(url, expectedMutation ?? ANY_MUTATION);
+	return true;
 }
 
 /**
@@ -96,25 +96,25 @@ export function markPageEmpty(state: GlobalState, credId: string, url: string, e
  * not occur. This preserves each credential's journey independence.
  */
 export function drainOnMutation(state: GlobalState, credId: string, taskMutation?: string): string[] {
-  const intel = getIntelligence(state, credId)
-  if (intel.emptyStateQueue.size === 0) return []
-  const drained: string[] = []
-  for (const [url, expected] of intel.emptyStateQueue) {
-    const matches = expected === ANY_MUTATION || (taskMutation !== undefined && expected === taskMutation)
-    if (!matches) continue
-    state.pageQueue.unshift(url)
-    intel.revisitCount.set(url, (intel.revisitCount.get(url) ?? 0) + 1)
-    // Input-only fingerprint matches on button-only pages — clear so revisit explores. §3.5.1
-    intel.pageFingerprints.delete(url)
-    drained.push(url)
-  }
-  for (const url of drained) intel.emptyStateQueue.delete(url)
-  return drained
+	const intel = getIntelligence(state, credId);
+	if (intel.emptyStateQueue.size === 0) return [];
+	const drained: string[] = [];
+	for (const [url, expected] of intel.emptyStateQueue) {
+		const matches = expected === ANY_MUTATION || (taskMutation !== undefined && expected === taskMutation);
+		if (!matches) continue;
+		state.pageQueue.unshift(url);
+		intel.revisitCount.set(url, (intel.revisitCount.get(url) ?? 0) + 1);
+		// Input-only fingerprint matches on button-only pages — clear so revisit explores. §3.5.1
+		intel.pageFingerprints.delete(url);
+		drained.push(url);
+	}
+	for (const url of drained) intel.emptyStateQueue.delete(url);
+	return drained;
 }
 
 /** Legacy alias kept for existing call sites. Drains ONLY ANY_MUTATION URLs for the credential. */
 export function drainEmptyStateQueue(state: GlobalState, credId: string): string[] {
-  return drainOnMutation(state, credId, undefined)
+	return drainOnMutation(state, credId, undefined);
 }
 
 /**
@@ -122,15 +122,15 @@ export function drainEmptyStateQueue(state: GlobalState, credId: string): string
  * mutation (POST/PUT/PATCH/DELETE with 2xx status). Format: "METHOD /path [status]".
  */
 export function hasSuccessfulMutation(httpRequests: string[] | undefined): boolean {
-  if (!httpRequests?.length) return false
-  for (const line of httpRequests) {
-    // e.g. "POST /api/Users/ [201]"
-    const match = line.match(/^(POST|PUT|PATCH|DELETE)\s+\S+\s+\[(\d+)\]/)
-    if (!match) continue
-    const status = parseInt(match[2]!, 10)
-    if (status >= 200 && status < 300) return true
-  }
-  return false
+	if (!httpRequests?.length) return false;
+	for (const line of httpRequests) {
+		// e.g. "POST /api/Users/ [201]"
+		const match = line.match(/^(POST|PUT|PATCH|DELETE)\s+\S+\s+\[(\d+)\]/);
+		if (!match) continue;
+		const status = parseInt(match[2]!, 10);
+		if (status >= 200 && status < 300) return true;
+	}
+	return false;
 }
 
 // ============================================================
@@ -138,24 +138,24 @@ export function hasSuccessfulMutation(httpRequests: string[] | undefined): boole
 // ============================================================
 
 const AUTH_PATTERNS: { type: DeferredAuthPage["type"]; pattern: RegExp }[] = [
-  { type: "register", pattern: /\/(register|signup|sign-up|create-account|join)/i },
-  { type: "login", pattern: /\/(login|signin|sign-in|authenticate|auth\/login)/i },
-  { type: "logout", pattern: /\/(logout|signout|sign-out|auth\/logout)/i },
-]
+	{ type: "register", pattern: /\/(register|signup|sign-up|create-account|join)/i },
+	{ type: "login", pattern: /\/(login|signin|sign-in|authenticate|auth\/login)/i },
+	{ type: "logout", pattern: /\/(logout|signout|sign-out|auth\/logout)/i },
+];
 
 /**
  * Classify a URL as an auth page (register/login/logout) or null if not auth-related.
  * Uses pathname-based heuristics — works across real-world apps.
  */
 export function classifyAuthUrl(url: string): DeferredAuthPage["type"] | null {
-  try {
-    const u = new URL(url)
-    const path = u.pathname + u.hash
-    for (const { type, pattern } of AUTH_PATTERNS) {
-      if (pattern.test(path)) return type
-    }
-  } catch {}
-  return null
+	try {
+		const u = new URL(url);
+		const path = u.pathname + u.hash;
+		for (const { type, pattern } of AUTH_PATTERNS) {
+			if (pattern.test(path)) return type;
+		}
+	} catch {}
+	return null;
 }
 
 /**
@@ -178,17 +178,17 @@ export function classifyAuthUrl(url: string): DeferredAuthPage["type"] | null {
  * Links stay excluded — BFS discovery already handles navigation.
  * Sorted for deterministic comparison.
  */
-export const INPUT_ROLES = new Set(["textbox", "combobox", "checkbox", "radio", "slider"])
+export const INPUT_ROLES = new Set(["textbox", "combobox", "checkbox", "radio", "slider"]);
 
 /** Content-area action roles that signal a real post-auth change when added/removed. */
-const ACTION_ROLES = new Set(["button", "menuitem", "tab"])
+const ACTION_ROLES = new Set(["button", "menuitem", "tab"]);
 
 export function generateFingerprint(elements: RawElement[]): string {
-  return elements
-    .filter((e) => INPUT_ROLES.has(e.role) || (ACTION_ROLES.has(e.role) && !e.inChrome))
-    .map((e) => `${e.role}:${e.label}:${e.type}:${e.enabled}`)
-    .sort()
-    .join("|")
+	return elements
+		.filter(e => INPUT_ROLES.has(e.role) || (ACTION_ROLES.has(e.role) && !e.inChrome))
+		.map(e => `${e.role}:${e.label}:${e.type}:${e.enabled}`)
+		.sort()
+		.join("|");
 }
 
 // ============================================================
@@ -215,11 +215,11 @@ export function generateFingerprint(elements: RawElement[]): string {
  *           false fingerprint mismatches. page-diff still includes info elements.)
  */
 export function generateFullFingerprint(elements: RawElement[]): string {
-  return elements
-    .filter((e) => e.label && e.role !== "link" && e.role !== "info")
-    .map((e) => [e.role, e.label, e.type, e.enabled, e.options || "", e.placeholder || ""].join(":"))
-    .sort()
-    .join("|")
+	return elements
+		.filter(e => e.label && e.role !== "link" && e.role !== "info")
+		.map(e => [e.role, e.label, e.type, e.enabled, e.options || "", e.placeholder || ""].join(":"))
+		.sort()
+		.join("|");
 }
 
 /**
@@ -232,15 +232,15 @@ export function generateFullFingerprint(elements: RawElement[]): string {
  *   "textbox::Search"     → ["admin", "manager", "editor", "user", "viewer"]
  */
 export function computeElementAvailability(elementsByContext: Map<string, RawElement[]>): Map<string, string[]> {
-  const availability = new Map<string, string[]>()
-  for (const [ctxId, elements] of elementsByContext) {
-    for (const el of elements) {
-      const key = `${el.role}::${el.label}`
-      if (!availability.has(key)) availability.set(key, [])
-      availability.get(key)!.push(ctxId)
-    }
-  }
-  return availability
+	const availability = new Map<string, string[]>();
+	for (const [ctxId, elements] of elementsByContext) {
+		for (const el of elements) {
+			const key = `${el.role}::${el.label}`;
+			if (!availability.has(key)) availability.set(key, []);
+			availability.get(key)!.push(ctxId);
+		}
+	}
+	return availability;
 }
 
 /**
@@ -248,24 +248,24 @@ export function computeElementAvailability(elementsByContext: Map<string, RawEle
  * Keys: "role:label" (single colon for readability), values: context ID arrays.
  */
 export function availabilityToRecord(availability: Map<string, string[]>): Record<string, string[]> {
-  const record: Record<string, string[]> = {}
-  for (const [key, contexts] of availability) {
-    // Convert "role::label" to "role:label" for readability
-    record[key.replace("::", ":")] = contexts
-  }
-  return record
+	const record: Record<string, string[]> = {};
+	for (const [key, contexts] of availability) {
+		// Convert "role::label" to "role:label" for readability
+		record[key.replace("::", ":")] = contexts;
+	}
+	return record;
 }
 
 export function createPageState(url: string): PageState {
-  return {
-    currentUrl: url,
-    elements: [],
-    viewportCenterBlocked: false,
-    actionsThisPage: [],
-    failedElementIds: new Set(),
-    lastActionResult: null,
-    step: 0,
-  }
+	return {
+		currentUrl: url,
+		elements: [],
+		viewportCenterBlocked: false,
+		actionsThisPage: [],
+		failedElementIds: new Set(),
+		lastActionResult: null,
+		step: 0,
+	};
 }
 
 // ============================================================
@@ -273,27 +273,27 @@ export function createPageState(url: string): PageState {
 // ============================================================
 
 export function recordAction(
-  pageState: PageState,
-  elementId: string,
-  action: string,
-  value: string | undefined,
-  result: ActionResult,
+	pageState: PageState,
+	elementId: string,
+	action: string,
+	value: string | undefined,
+	result: ActionResult,
 ): void {
-  const record: ActionRecord = {
-    elementId,
-    action,
-    value,
-    success: result.success,
-    httpSideEffects: result.httpRequests,
-  }
-  pageState.actionsThisPage.push(record)
+	const record: ActionRecord = {
+		elementId,
+		action,
+		value,
+		success: result.success,
+		httpSideEffects: result.httpRequests,
+	};
+	pageState.actionsThisPage.push(record);
 
-  if (!result.success) {
-    pageState.failedElementIds.add(elementId)
-  }
+	if (!result.success) {
+		pageState.failedElementIds.add(elementId);
+	}
 
-  pageState.lastActionResult = result
-  pageState.step++
+	pageState.lastActionResult = result;
+	pageState.step++;
 }
 
 // ============================================================
@@ -301,24 +301,24 @@ export function recordAction(
 // ============================================================
 
 export function normalizeUrl(url: string): string {
-  try {
-    const u = new URL(url)
-    u.searchParams.sort()
-    let path = u.pathname.replace(/\/+$/, "") || "/"
-    // Normalize hash path: #recycle → #/recycle (SPA routing consistency)
-    let hash = u.hash
-    if (hash && hash !== "#" && !hash.startsWith("#/")) {
-      hash = "#/" + hash.slice(1)
-    }
-    // BUG-5 / Aşama 13: unify root representations — "", "#", "#/" all mean
-    // the SPA root. Also strip trailing slash from hash routes ("#/cart/" →
-    // "#/cart"). Prevents duplicate queueing of the same logical page.
-    hash = hash.replace(/\/+$/, "")
-    if (hash === "#") hash = ""
-    return u.origin + path + u.search + hash
-  } catch {
-    return url
-  }
+	try {
+		const u = new URL(url);
+		u.searchParams.sort();
+		const path = u.pathname.replace(/\/+$/, "") || "/";
+		// Normalize hash path: #recycle → #/recycle (SPA routing consistency)
+		let hash = u.hash;
+		if (hash && hash !== "#" && !hash.startsWith("#/")) {
+			hash = `#/${hash.slice(1)}`;
+		}
+		// BUG-5 / Aşama 13: unify root representations — "", "#", "#/" all mean
+		// the SPA root. Also strip trailing slash from hash routes ("#/cart/" →
+		// "#/cart"). Prevents duplicate queueing of the same logical page.
+		hash = hash.replace(/\/+$/, "");
+		if (hash === "#") hash = "";
+		return u.origin + path + u.search + hash;
+	} catch {
+		return url;
+	}
 }
 
 // ============================================================
@@ -327,32 +327,32 @@ export function normalizeUrl(url: string): string {
 
 /** Sliding window: first 3 + last 7 actions (preserves context + recent memory) */
 function getActionsForPrompt(actions: ActionRecord[]): ActionRecord[] {
-  if (actions.length <= MAX_ACTIONS_IN_PROMPT) return actions
-  return [...actions.slice(0, 3), ...actions.slice(-7)]
+	if (actions.length <= MAX_ACTIONS_IN_PROMPT) return actions;
+	return [...actions.slice(0, 3), ...actions.slice(-7)];
 }
 
 /** Element format for LLM — excludes selector (system-internal) */
 interface PromptElement {
-  id: string
-  role: string
-  label: string
-  type?: string
-  value?: string
-  placeholder?: string
-  href?: string
-  options?: string
-  constraints?: string
-  enabled?: boolean
-  /** Set when a click on this element was found physically covered by an overlay.
-   *  Carries the occluder's visible text so the LLM can dismiss it first. */
-  occludedBy?: string
+	id: string;
+	role: string;
+	label: string;
+	type?: string;
+	value?: string;
+	placeholder?: string;
+	href?: string;
+	options?: string;
+	constraints?: string;
+	enabled?: boolean;
+	/** Set when a click on this element was found physically covered by an overlay.
+	 *  Carries the occluder's visible text so the LLM can dismiss it first. */
+	occludedBy?: string;
 }
 
 /** A target found covered by an overlay at click time (reactive occlusion probe). */
 export interface OcclusionSignal {
-  label: string
-  role: string
-  occluderText: string
+	label: string;
+	role: string;
+	occluderText: string;
 }
 
 /**
@@ -363,43 +363,43 @@ export interface OcclusionSignal {
  *    up (marked done) instead of re-signaling — this bounds any dismiss loop.
  */
 export interface OcclusionState {
-  pending: OcclusionSignal[]
-  signaled: Set<string>
+	pending: OcclusionSignal[];
+	signaled: Set<string>;
 }
 
 function elementToPrompt(el: RawElement): PromptElement {
-  const result: PromptElement = {
-    id: el.id,
-    role: el.role,
-    label: el.label,
-  }
-  if (el.type) result.type = el.type
-  if (el.value) result.value = el.value
-  if (el.placeholder) result.placeholder = el.placeholder
-  if (el.options) result.options = el.options
-  if (el.constraints) result.constraints = el.constraints
-  if (!el.enabled) result.enabled = false // only include when disabled (saves tokens)
-  if (el.href) {
-    // Show only path+hash, not full URL (saves tokens)
-    try {
-      const u = new URL(el.href)
-      result.href = u.pathname + u.hash
-    } catch {
-      result.href = el.href
-    }
-  }
-  return result
+	const result: PromptElement = {
+		id: el.id,
+		role: el.role,
+		label: el.label,
+	};
+	if (el.type) result.type = el.type;
+	if (el.value) result.value = el.value;
+	if (el.placeholder) result.placeholder = el.placeholder;
+	if (el.options) result.options = el.options;
+	if (el.constraints) result.constraints = el.constraints;
+	if (!el.enabled) result.enabled = false; // only include when disabled (saves tokens)
+	if (el.href) {
+		// Show only path+hash, not full URL (saves tokens)
+		try {
+			const u = new URL(el.href);
+			result.href = u.pathname + u.hash;
+		} catch {
+			result.href = el.href;
+		}
+	}
+	return result;
 }
 
 export interface PromptPayload {
-  url: string
-  viewportCenterBlocked: boolean
-  totalPagesVisited: number
-  unvisitedLinksOnPage: number
-  lastAction: ActionRecord | null
-  recentActions: ActionRecord[]
-  failedElements: string[]
-  elements: PromptElement[]
+	url: string;
+	viewportCenterBlocked: boolean;
+	totalPagesVisited: number;
+	unvisitedLinksOnPage: number;
+	lastAction: ActionRecord | null;
+	recentActions: ActionRecord[];
+	failedElements: string[];
+	elements: PromptElement[];
 }
 
 /**
@@ -407,34 +407,34 @@ export interface PromptPayload {
  * All fields are bounded — total token count stays under ~3K.
  */
 export function buildPromptPayload(pageState: PageState, globalState: GlobalState): PromptPayload {
-  const recentActions = getActionsForPrompt(pageState.actionsThisPage)
-  const failedElements = [...pageState.failedElementIds].slice(0, MAX_FAILED_ELEMENTS)
+	const recentActions = getActionsForPrompt(pageState.actionsThisPage);
+	const failedElements = [...pageState.failedElementIds].slice(0, MAX_FAILED_ELEMENTS);
 
-  // Count unvisited links among current elements (normalize href before comparing)
-  const unvisitedLinksOnPage = pageState.elements.filter(
-    (el) => el.role === "link" && el.href && !globalState.visitedPages.has(normalizeUrl(el.href)),
-  ).length
+	// Count unvisited links among current elements (normalize href before comparing)
+	const unvisitedLinksOnPage = pageState.elements.filter(
+		el => el.role === "link" && el.href && !globalState.visitedPages.has(normalizeUrl(el.href)),
+	).length;
 
-  const lastAction =
-    pageState.actionsThisPage.length > 0 ? pageState.actionsThisPage[pageState.actionsThisPage.length - 1]! : null
+	const lastAction =
+		pageState.actionsThisPage.length > 0 ? pageState.actionsThisPage[pageState.actionsThisPage.length - 1]! : null;
 
-  return {
-    url: pageState.currentUrl,
-    viewportCenterBlocked: pageState.viewportCenterBlocked,
-    totalPagesVisited: globalState.visitedPages.size,
-    unvisitedLinksOnPage,
-    lastAction,
-    recentActions,
-    failedElements,
-    elements: pageState.elements.map(elementToPrompt),
-  }
+	return {
+		url: pageState.currentUrl,
+		viewportCenterBlocked: pageState.viewportCenterBlocked,
+		totalPagesVisited: globalState.visitedPages.size,
+		unvisitedLinksOnPage,
+		lastAction,
+		recentActions,
+		failedElements,
+		elements: pageState.elements.map(elementToPrompt),
+	};
 }
 
 /**
  * Find element by ID in the current page state.
  */
 export function findElement(pageState: PageState, elementId: string): RawElement | undefined {
-  return pageState.elements.find((el) => el.id === elementId)
+	return pageState.elements.find(el => el.id === elementId);
 }
 
 // ============================================================
@@ -443,15 +443,15 @@ export function findElement(pageState: PageState, elementId: string): RawElement
 
 /** Minimal snapshot sent to LLM planner — no action history, no failed elements */
 export interface PlannerSnapshot {
-  url: string
-  viewportCenterBlocked: boolean
-  totalPagesVisited: number
-  elements: PromptElement[]
-  /** Aşama 13 §3.3.1 — out-of-scope labels. Omitted when empty (token saving). */
-  outOfScope?: string[]
-  /** Aşama 13 Mutation Matching — keywords currently awaiting a triggering mutation.
-   *  LLM should tag matching tasks with triggersMutation=<keyword> for targeted drain. */
-  pendingMutations?: string[]
+	url: string;
+	viewportCenterBlocked: boolean;
+	totalPagesVisited: number;
+	elements: PromptElement[];
+	/** Aşama 13 §3.3.1 — out-of-scope labels. Omitted when empty (token saving). */
+	outOfScope?: string[];
+	/** Aşama 13 Mutation Matching — keywords currently awaiting a triggering mutation.
+	 *  LLM should tag matching tasks with triggersMutation=<keyword> for targeted drain. */
+	pendingMutations?: string[];
 }
 
 /**
@@ -462,40 +462,40 @@ export interface PlannerSnapshot {
  *                    Omitted from the snapshot when empty/undefined.
  */
 export function buildPlannerSnapshot(
-  url: string,
-  elements: RawElement[],
-  globalState: GlobalState,
-  credId: string,
-  viewportCenterBlocked: boolean,
-  occlusions?: readonly OcclusionSignal[],
+	url: string,
+	elements: RawElement[],
+	globalState: GlobalState,
+	credId: string,
+	viewportCenterBlocked: boolean,
+	occlusions?: readonly OcclusionSignal[],
 ): PlannerSnapshot {
-  const promptElements = elements.map(elementToPrompt)
-  // Mark any element found covered at click time so the planner dismisses the
-  // overlay first (System Observes occlusion / LLM Interprets how to clear it).
-  if (occlusions && occlusions.length > 0) {
-    for (const occ of occlusions) {
-      const match = promptElements.find((e) => e.label === occ.label && e.role === occ.role)
-      if (match) match.occludedBy = occ.occluderText
-    }
-  }
-  const snapshot: PlannerSnapshot = {
-    url,
-    viewportCenterBlocked,
-    totalPagesVisited: globalState.visitedPages.size,
-    elements: promptElements,
-  }
-  if (globalState.outOfScope.length > 0) {
-    snapshot.outOfScope = [...globalState.outOfScope]
-  }
-  // Aşama 13 Mutation Matching — unique pending keywords for this credential
-  // (exclude ANY_MUTATION fallback). Each credential's own pending list is used.
-  const intel = getIntelligence(globalState, credId)
-  const pending = new Set<string>()
-  for (const kw of intel.emptyStateQueue.values()) {
-    if (kw !== ANY_MUTATION) pending.add(kw)
-  }
-  if (pending.size > 0) {
-    snapshot.pendingMutations = [...pending]
-  }
-  return snapshot
+	const promptElements = elements.map(elementToPrompt);
+	// Mark any element found covered at click time so the planner dismisses the
+	// overlay first (System Observes occlusion / LLM Interprets how to clear it).
+	if (occlusions && occlusions.length > 0) {
+		for (const occ of occlusions) {
+			const match = promptElements.find(e => e.label === occ.label && e.role === occ.role);
+			if (match) match.occludedBy = occ.occluderText;
+		}
+	}
+	const snapshot: PlannerSnapshot = {
+		url,
+		viewportCenterBlocked,
+		totalPagesVisited: globalState.visitedPages.size,
+		elements: promptElements,
+	};
+	if (globalState.outOfScope.length > 0) {
+		snapshot.outOfScope = [...globalState.outOfScope];
+	}
+	// Aşama 13 Mutation Matching — unique pending keywords for this credential
+	// (exclude ANY_MUTATION fallback). Each credential's own pending list is used.
+	const intel = getIntelligence(globalState, credId);
+	const pending = new Set<string>();
+	for (const kw of intel.emptyStateQueue.values()) {
+		if (kw !== ANY_MUTATION) pending.add(kw);
+	}
+	if (pending.size > 0) {
+		snapshot.pendingMutations = [...pending];
+	}
+	return snapshot;
 }

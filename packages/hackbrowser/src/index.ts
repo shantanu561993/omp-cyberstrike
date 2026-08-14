@@ -4,13 +4,13 @@
 //
 // Keep this file thin. New flags belong in api.ts:parseArgsToOptions.
 
-import { Log } from "./log.ts"
-import { runCrawl, parseArgsToOptions } from "./api.ts"
+import { parseArgsToOptions, runCrawl } from "./api.ts";
+import { Log } from "./log.ts";
 
-const argv = process.argv.slice(2)
+const argv = process.argv.slice(2);
 
 if (argv.length === 0 || argv.includes("--help")) {
-  console.log(`
+	console.log(`
 CyberStrike Browser Agent
 
 Usage: bun start <targetUrl> [options]
@@ -49,25 +49,25 @@ Examples:
   bun start https://app.example.com --credential admin --credential user
   bun start https://app.example.com --exclude "Delete Account"
   bun start https://app.example.com --scope app.example.com --scope api.example.com
-`)
-  process.exit(0)
+`);
+	process.exit(0);
 }
 
 // Initialize logger early so parsing-stage messages aren't lost.
-Log.init({ level: argv.includes("--debug") ? "DEBUG" : "INFO" })
+Log.init({ level: argv.includes("--debug") ? "DEBUG" : "INFO" });
 
-const opts = parseArgsToOptions(argv)
+const opts = parseArgsToOptions(argv);
 
 try {
-  const result = await runCrawl(opts)
-  if (result.errors.length > 0) {
-    console.error("[fatal]", result.errors.join("\n"))
-    process.exit(1)
-  }
-  process.exit(0)
+	const result = await runCrawl(opts);
+	if (result.errors.length > 0) {
+		console.error("[fatal]", result.errors.join("\n"));
+		process.exit(1);
+	}
+	process.exit(0);
 } catch (err) {
-  // Validation/preflight throws (multi-credential mismatch, missing chromium).
-  // These are caller-error conditions; surface them clearly and exit non-zero.
-  console.error("[fatal]", err instanceof Error ? err.message : String(err))
-  process.exit(1)
+	// Validation/preflight throws (multi-credential mismatch, missing chromium).
+	// These are caller-error conditions; surface them clearly and exit non-zero.
+	console.error("[fatal]", err instanceof Error ? err.message : String(err));
+	process.exit(1);
 }

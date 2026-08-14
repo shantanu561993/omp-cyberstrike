@@ -1,5 +1,5 @@
-import type { Page } from "playwright"
-import type { CSEvent } from "../types.ts"
+import type { Page } from "playwright";
+import type { CSEvent } from "../types.ts";
 
 /**
  * Module-level on/off switch for panel emissions. When disabled, csEmit
@@ -13,10 +13,10 @@ import type { CSEvent } from "../types.ts"
  * runs feed status updates to the TUI sidebar without injecting any
  * browser-side panel.
  */
-let enabled = true
+let enabled = true;
 
 export function setPanelEnabled(value: boolean): void {
-  enabled = value
+	enabled = value;
 }
 
 /**
@@ -34,14 +34,14 @@ export function setPanelEnabled(value: boolean): void {
  * Multi-instance/concurrent-runCrawl story would need an instance-bound
  * sink. Documented as a known constraint, deferred until measured.
  */
-let eventSink: ((event: CSEvent) => void) | null = null
+let eventSink: ((event: CSEvent) => void) | null = null;
 
 export function setEventSink(sink: (event: CSEvent) => void): void {
-  eventSink = sink
+	eventSink = sink;
 }
 
 export function clearEventSink(): void {
-  eventSink = null
+	eventSink = null;
 }
 
 /**
@@ -57,26 +57,26 @@ export function clearEventSink(): void {
  * agent. Sink throws are logged so debug is possible without coupling.
  */
 export async function csEmit(page: Page, event: CSEvent): Promise<void> {
-  // Cyberstrike sink — synchronous, runs first so the TUI sidebar gets
-  // the update even if the browser-side emit is slow. Always evaluated
-  // when registered (independent of the `enabled` panel switch).
-  if (eventSink) {
-    try {
-      eventSink(event)
-    } catch (err) {
-      // Don't import Log here — would create a circular dep with log.ts
-      // for telemetry that isn't load-bearing. console.error is enough
-      // for the rare case a sink throws.
-      console.error("[hackbrowser:emit] eventSink threw, swallowing:", err)
-    }
-  }
+	// Cyberstrike sink — synchronous, runs first so the TUI sidebar gets
+	// the update even if the browser-side emit is slow. Always evaluated
+	// when registered (independent of the `enabled` panel switch).
+	if (eventSink) {
+		try {
+			eventSink(event);
+		} catch (err) {
+			// Don't import Log here — would create a circular dep with log.ts
+			// for telemetry that isn't load-bearing. console.error is enough
+			// for the rare case a sink throws.
+			console.error("[hackbrowser:emit] eventSink threw, swallowing:", err);
+		}
+	}
 
-  // Browser panel — async via page.evaluate, gated by setPanelEnabled().
-  if (!enabled) return
-  await page
-    .evaluate((e) => {
-      const w = window as unknown as { __csEvent?: (e: unknown) => void }
-      w.__csEvent?.(e)
-    }, event as unknown)
-    .catch(() => {})
+	// Browser panel — async via page.evaluate, gated by setPanelEnabled().
+	if (!enabled) return;
+	await page
+		.evaluate(e => {
+			const w = window as unknown as { __csEvent?: (e: unknown) => void };
+			w.__csEvent?.(e);
+		}, event as unknown)
+		.catch(() => {});
 }

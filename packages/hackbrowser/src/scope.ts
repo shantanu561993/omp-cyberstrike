@@ -2,10 +2,11 @@
 // "exports", so TypeScript treats the import as untyped. We narrow it
 // here with the only call signature we use.
 // @ts-expect-error - see comment above
-import pslDefault from "psl"
+import pslDefault from "psl";
+
 const psl = pslDefault as {
-  parse(host: string): { domain: string | null; error?: { code: string; message: string } }
-}
+	parse(host: string): { domain: string | null; error?: { code: string; message: string } };
+};
 
 // ============================================================
 // Network scope (ARCHITECTURE.md §1.2 — Network Scope)
@@ -23,7 +24,7 @@ const psl = pslDefault as {
 // equivalent matchers (matching foo.com itself + any subdomain).
 // ============================================================
 
-export type ScopeMatcher = (host: string) => boolean
+export type ScopeMatcher = (host: string) => boolean;
 
 /**
  * Strip protocol, path, query, port, trailing dots; lowercase.
@@ -31,13 +32,13 @@ export type ScopeMatcher = (host: string) => boolean
  * Wildcard prefix "*." is preserved.
  */
 export function normalizeScope(input: string): string {
-  let s = input.trim().toLowerCase()
-  if (!s) return ""
-  s = s.replace(/^https?:\/\//, "")
-  s = s.split(/[/?#]/)[0] ?? ""
-  s = s.replace(/:\d+$/, "")
-  while (s.endsWith(".")) s = s.slice(0, -1)
-  return s
+	let s = input.trim().toLowerCase();
+	if (!s) return "";
+	s = s.replace(/^https?:\/\//, "");
+	s = s.split(/[/?#]/)[0] ?? "";
+	s = s.replace(/:\d+$/, "");
+	while (s.endsWith(".")) s = s.slice(0, -1);
+	return s;
 }
 
 /**
@@ -52,10 +53,10 @@ export function normalizeScope(input: string): string {
  * setups while logging a warning is the caller's responsibility.
  */
 export function deriveScope(targetUrl: string): string {
-  const host = new URL(targetUrl).hostname.toLowerCase()
-  const parsed = psl.parse(host)
-  if ("error" in parsed || !parsed.domain) return `*.${host}`
-  return `*.${parsed.domain}`
+	const host = new URL(targetUrl).hostname.toLowerCase();
+	const parsed = psl.parse(host);
+	if ("error" in parsed || !parsed.domain) return `*.${host}`;
+	return `*.${parsed.domain}`;
 }
 
 /**
@@ -69,16 +70,16 @@ export function deriveScope(targetUrl: string): string {
  * Empty input → matcher that rejects everything (safe default).
  */
 export function makeMatcher(scopes: readonly string[]): ScopeMatcher {
-  const bases = scopes
-    .map(normalizeScope)
-    .filter((s) => s.length > 0)
-    .map((s) => (s.startsWith("*.") ? s.slice(2) : s))
-  if (bases.length === 0) return () => false
-  return (host: string) => {
-    const h = host.toLowerCase().replace(/\.+$/, "")
-    for (const base of bases) {
-      if (h === base || h.endsWith("." + base)) return true
-    }
-    return false
-  }
+	const bases = scopes
+		.map(normalizeScope)
+		.filter(s => s.length > 0)
+		.map(s => (s.startsWith("*.") ? s.slice(2) : s));
+	if (bases.length === 0) return () => false;
+	return (host: string) => {
+		const h = host.toLowerCase().replace(/\.+$/, "");
+		for (const base of bases) {
+			if (h === base || h.endsWith(`.${base}`)) return true;
+		}
+		return false;
+	};
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Crawler wrapper around the vendored hackbrowser engine (AGPL-3.0,
  * CyberStrike packages/hackbrowser — see lib/api.ts header).
@@ -19,15 +20,15 @@
  * OPENAI_API_KEY. Without any key the crawler exits 2.
  */
 
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
-import { runCrawl, type CrawlOptions } from "./src/api.ts";
+import { type CrawlOptions, runCrawl } from "./src/api.ts";
 import { saveSession } from "./src/auth.ts";
 import { extractAuthHeaders } from "./src/ingest.ts";
-import type { CSEvent, IngestPayload } from "./src/types.ts";
+import type { CrawlResult, CSEvent, IngestPayload } from "./src/types.ts";
 
 const USAGE = `Usage: bun crawl.ts --url <url> [options]
 
@@ -77,6 +78,7 @@ function parseArgs(argv: string[]): Args {
 			case "--help":
 				console.log(USAGE);
 				process.exit(0);
+				break; // unreachable — satisfies lint; parseArgs never continues after help
 			case "--url":
 				args.url = next(i, "--url");
 				i++;
@@ -184,7 +186,7 @@ function startSink(): Promise<Sink> {
 		server.removeListener("error", reject);
 		resolve({
 			records,
-			close: () => new Promise((r) => server.close(() => r())),
+			close: () => new Promise(r => server.close(() => r())),
 		});
 	});
 	return promise;
@@ -199,7 +201,9 @@ function resolveModel() {
 		);
 	}
 	if (process.env.ANTHROPIC_API_KEY) {
-		return createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY })(process.env.BROWSER_AGENT_MODEL ?? "claude-sonnet-4-6");
+		return createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY })(
+			process.env.BROWSER_AGENT_MODEL ?? "claude-sonnet-4-6",
+		);
 	}
 	if (process.env.OPENAI_API_KEY) {
 		return createOpenAI({ apiKey: process.env.OPENAI_API_KEY })(process.env.BROWSER_AGENT_MODEL ?? "gpt-4o");
@@ -212,7 +216,7 @@ function parseRawRequest(raw: string): { method: string; path: string; host?: st
 	const lines = raw.split(/\r?\n/);
 	const first = lines[0] ?? "";
 	const parts = first.split(" ");
-	const hostLine = lines.find((l) => /^host:/i.test(l));
+	const hostLine = lines.find(l => /^host:/i.test(l));
 	return { method: parts[0] ?? "", path: parts[1] ?? "", host: hostLine?.split(":")[1]?.trim() };
 }
 
@@ -238,12 +242,12 @@ function normalizeRecord(payload: IngestPayload, scheme: string): Record<string,
 function toNetscapeJar(
 	cookies: Array<{ name: string; value: string; domain: string; path: string; expires: number; secure: boolean }>,
 ): string {
-	const lines = cookies.map((c) => {
+	const lines = cookies.map(c => {
 		const domain = c.domain.startsWith(".") ? c.domain : `.${c.domain}`;
 		const expiry = c.expires && c.expires > 0 ? Math.floor(c.expires) : 0;
 		return [domain, "TRUE", c.path || "/", c.secure ? "TRUE" : "FALSE", String(expiry), c.name, c.value].join("\t");
 	});
-	return lines.length > 0 ? lines.join("\n") + "\n" : "";
+	return lines.length > 0 ? `${lines.join("\n")}\n` : "";
 }
 
 /** Export the authenticated session: engine session.json + Netscape jar + auth headers. */
@@ -283,26 +287,31 @@ async function main(): Promise<void> {
 		panel: false,
 		cyberstrikeUrl: `http://${SINK_HOST}:${SINK_PORT}`,
 		model,
-		eventSink: (e) => {
+		eventSink: e => {
 			if (e.type === "capture") captures.push(e);
 		},
-		logSink: (record) => {
+		logSink: record => {
 			if (record.level === "ERROR" || record.level === "WARN") {
 				console.error(`[crawler:${record.level.toLowerCase()}] ${record.message}`);
 			}
 		},
 	};
 	if (args.user && args.pass) {
-		opts.credentials = { username: args.user, password: args.pass, usernameSelector: args.selU, passwordSelector: args.selP };
+		opts.credentials = {
+			username: args.user,
+			password: args.pass,
+			usernameSelector: args.selU,
+			passwordSelector: args.selP,
+		};
 	}
 	if (args.sessionOut) {
-		opts.onCrawlEnd = (context) => exportSession(context, args.sessionOut!, sink.records);
+		opts.onCrawlEnd = context => exportSession(context, args.sessionOut!, sink.records);
 	}
 	if (args.sessionIn) {
 		opts.sessionFile = join(args.sessionIn, "session.json");
 	}
 
-	let result;
+	let result: CrawlResult;
 	try {
 		result = await runCrawl(opts);
 	} catch (err) {
@@ -318,20 +327,22 @@ async function main(): Promise<void> {
 		console.error(`output directory does not exist: ${dir}`);
 		process.exit(1);
 	}
-	const lines = sink.records.map((p) => JSON.stringify(normalizeRecord(p, "http")));
+	const lines = sink.records.map(p => JSON.stringify(normalizeRecord(p, "http")));
 	writeFileSync(outPath, lines.join("\n") + (lines.length > 0 ? "\n" : ""));
 
 	console.log(`pages explored: ${result.pagesExplored}`);
 	console.log(`captured endpoints: ${result.capturedEndpoints}`);
 	console.log(`output: ${outPath} (${lines.length} records)`);
 	if (args.sessionOut) {
-		console.log(`session exported: ${args.sessionOut}/session.json, ${args.sessionOut}/cookies.txt, ${args.sessionOut}/headers.json`);
+		console.log(
+			`session exported: ${args.sessionOut}/session.json, ${args.sessionOut}/cookies.txt, ${args.sessionOut}/headers.json`,
+		);
 	}
 	for (const e of result.errors) console.error(`error: ${e}`);
 	process.exit(result.errors.length > 0 ? 1 : 0);
 }
 
-main().catch((err) => {
+main().catch(err => {
 	console.error(`crawler failed: ${(err as Error).message}`);
 	process.exit(1);
 });

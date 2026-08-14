@@ -100,9 +100,9 @@ function updateJarForSetCookie(jar: string, setCookies: string[], host: string):
 		if (eq <= 0) continue;
 		const name = pair.slice(0, eq).trim();
 		const value = pair.slice(eq + 1).trim();
-		const lines = out.split("\n").filter((l) => !l.startsWith("#") && l.split("\t").length >= 7);
+		const lines = out.split("\n").filter(l => !l.startsWith("#") && l.split("\t").length >= 7);
 		let replaced = false;
-		const next = lines.map((l) => {
+		const next = lines.map(l => {
 			const parts = l.split("\t");
 			if (parts[5] === name) {
 				replaced = true;
@@ -116,7 +116,7 @@ function updateJarForSetCookie(jar: string, setCookies: string[], host: string):
 		} else {
 			// Append as a new jar line (host from the request, session cookie).
 			const domain = `.${host}`;
-			out += [domain, "TRUE", "/", "FALSE", "0", name, value].join("\t") + "\n";
+			out += `${[domain, "TRUE", "/", "FALSE", "0", name, value].join("\t")}\n`;
 		}
 	}
 	return out;
@@ -131,7 +131,7 @@ function atomicWrite(file: string, content: string): void {
 // --- logging -----------------------------------------------------------------
 
 function log(dir: string, record: Record<string, unknown>): void {
-	fs.appendFileSync(path.join(dir, "bot.log"), JSON.stringify({ ts: new Date().toISOString(), ...record }) + "\n");
+	fs.appendFileSync(path.join(dir, "bot.log"), `${JSON.stringify({ ts: new Date().toISOString(), ...record })}\n`);
 }
 
 // --- reauth ------------------------------------------------------------------
@@ -218,7 +218,9 @@ async function main(): Promise<void> {
 			status = res.status;
 			len = body.byteLength;
 
-			const redirectToLogin = res.status === 302 && ((res.headers.get("location") ?? "").includes("login") || res.status === 401 || res.status === 403);
+			const redirectToLogin =
+				res.status === 302 &&
+				((res.headers.get("location") ?? "").includes("login") || res.status === 401 || res.status === 403);
 			const drift = baselineLen > 0 ? Math.abs(len - baselineLen) / baselineLen : 0;
 
 			if (res.status >= 500) {
@@ -228,10 +230,15 @@ async function main(): Promise<void> {
 					log(dir, { status, len, drift, action: "fatal", reason: "5 consecutive transient errors" });
 					process.exit(2);
 				}
-			} else if (res.status === 401 || res.status === 403 || redirectToLogin || (baselineLen > 0 && drift > args.drift)) {
+			} else if (
+				res.status === 401 ||
+				res.status === 403 ||
+				redirectToLogin ||
+				(baselineLen > 0 && drift > args.drift)
+			) {
 				transientErrors = 0;
 				// DEAD — re-authenticate.
-				const fresh = await reauth(dir, jar).catch((err) => ({ jar, ok: false, err }));
+				const fresh = await reauth(dir, jar).catch(err => ({ jar, ok: false, err }));
 				if (fresh.ok) {
 					jar = fresh.jar;
 					reauthFailures = 0;
@@ -299,13 +306,13 @@ async function main(): Promise<void> {
 		} catch {
 			log(dir, { status: 0, len: 0, drift: 0, action: "transient" });
 		}
-		await new Promise((r) => setTimeout(r, args.intervalSec * 1000));
+		await new Promise(r => setTimeout(r, args.intervalSec * 1000));
 	}
 
 	setInterval(() => void tick(), args.intervalSec * 1000);
 }
 
-main().catch((err) => {
+main().catch(err => {
 	console.error(`session-bot failed: ${(err as Error).message}`);
 	process.exit(2);
 });

@@ -376,7 +376,7 @@ const PANEL_CSS = `
 .boot .ln .hl { color: #e5e7eb; }
 @keyframes boot-ln { to { opacity: 1; } }
 .boot.done { opacity: 0; pointer-events: none; transition: opacity 220ms ease-out; }
-`
+`;
 
 const PANEL_HTML = `
 <div class="root">
@@ -437,7 +437,7 @@ const PANEL_HTML = `
     </div>
   </div>
 </div>
-`
+`;
 
 const PANEL_JS_BODY = `
 // ---------- helpers ----------
@@ -926,7 +926,7 @@ Object.defineProperty(window, '__csEvent', {
   configurable: true,
   value: function (e) { try { handle(e); } catch (_) {} }
 });
-`
+`;
 
 /**
  * The actual init script injected by playwright. Wrapped in an IIFE, idempotent
@@ -978,4 +978,4 @@ export const PANEL_INIT_SCRIPT = `
     try { console && console.debug && console.debug('[cs-panel] init failed', err); } catch (_) {}
   }
 })();
-`
+`;
