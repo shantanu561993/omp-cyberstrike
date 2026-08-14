@@ -35,6 +35,7 @@ import { canSpawnAtDepth, type StructuredSubagentSchemaMode } from "../task/type
 import type { EventBus } from "../utils/event-bus";
 import { type InspectImageMode, isInspectImageToolActive } from "../utils/inspect-image-mode";
 import { WebSearchTool } from "../web/search";
+import { WebCrawlTool } from "./web-crawl";
 import type { WorkspaceTree } from "../workspace-tree";
 import { AskTool } from "./ask";
 import { AttackScriptTool } from "./attack-script";
@@ -449,6 +450,7 @@ export const BUILTIN_TOOLS: Record<BuiltinToolName, ToolFactory> = {
 	attack_script: s => new AttackScriptTool(s),
 	http_log: s => new HttpLogTool(s),
 	methodology: s => new MethodologyTool(s),
+	web_crawl: s => new WebCrawlTool(s),
 };
 
 export const HIDDEN_TOOLS: Record<HiddenToolName, ToolFactory> = {

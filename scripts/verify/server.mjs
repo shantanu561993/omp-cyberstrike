@@ -36,7 +36,13 @@ const server = http.createServer((req, res) => {
 
 	if (method === "GET" && url.pathname === "/") {
 		res.writeHead(200, { "Content-Type": "text/html" });
-		res.end("<html><body><h1>pentest-fixture</h1><a href=\"/login\">login</a></body></html>");
+		res.end(`<html><body><h1>pentest-fixture</h1>
+<form method="POST" action="/login">
+  <input type="text" name="username" />
+  <input type="password" name="password" />
+  <button type="submit">Sign in</button>
+</form>
+<a href="/login">login</a></body></html>`);
 		return;
 	}
 

@@ -1,0 +1,26 @@
+{
+	"name": "@omp/hackbrowser",
+	"version": "1.0.0",
+	"description": "Vendored CyberStrike hackbrowser (AGPL-3.0): LLM-navigated web crawl with HTTP capture + session export + session-guardian bot",
+	"type": "module",
+	"private": true,
+	"exports": {
+		".": "./src/index.ts",
+		"./api": "./src/api.ts"
+	},
+	"scripts": {
+		"build": "bun build crawl.ts --target node --format esm --outfile dist/crawl.mjs --external playwright --external playwright-core && bun build session-bot.ts --target node --format esm --outfile dist/session-bot.mjs --external playwright --external playwright-core",
+		"build:crawl": "bun build crawl.ts --target node --format esm --outfile dist/crawl.mjs --external playwright --external playwright-core",
+		"build:bot": "bun build session-bot.ts --target node --format esm --outfile dist/session-bot.mjs --external playwright --external playwright-core"
+	},
+	"dependencies": {
+		"@ai-sdk/anthropic": "2.0.0",
+		"@ai-sdk/openai": "2.0.2",
+		"ai": "5.0.124",
+		"playwright": "1.58.2",
+		"psl": "1.15.0"
+	},
+	"devDependencies": {
+		"@types/node": "^24.0.0"
+	}
+}
