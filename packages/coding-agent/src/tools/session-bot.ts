@@ -1,7 +1,7 @@
-import { type } from "@oh-my-pi/omptype";
-import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-pi/pi-agent-core";
 import * as fs from "node:fs";
 import { join } from "node:path";
+import { type } from "@oh-my-pi/omptype";
+import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-pi/pi-agent-core";
 import { getPentestDir } from "../pentest/assets";
 import type { ToolSession } from "./index";
 import { ToolError } from "./tool-errors";
@@ -48,10 +48,7 @@ export class SessionBotTool implements AgentTool<typeof sessionBotSchema, Sessio
 
 	constructor(readonly session: ToolSession) {}
 
-	async execute(
-		_toolCallId: string,
-		params: SessionBotParams,
-	): Promise<AgentToolResult<SessionBotToolDetails>> {
+	async execute(_toolCallId: string, params: SessionBotParams): Promise<AgentToolResult<SessionBotToolDetails>> {
 		if (!params.sessionDir) throw new ToolError("session_bot requires `sessionDir`");
 		const pidFile = pidPath(params.sessionDir);
 
@@ -118,7 +115,7 @@ export class SessionBotTool implements AgentTool<typeof sessionBotSchema, Sessio
 					// already gone
 				}
 				// Give it a moment, then force.
-				await new Promise((r) => setTimeout(r, 500));
+				await new Promise(r => setTimeout(r, 500));
 				try {
 					process.kill(pid, "SIGKILL");
 				} catch {

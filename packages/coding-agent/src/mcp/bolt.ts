@@ -79,8 +79,8 @@ export function listBoltCredentials(): string[] {
 	fs.mkdirSync(boltKeysDir(), { recursive: true });
 	return fs
 		.readdirSync(boltKeysDir())
-		.filter((f) => f.endsWith(".json"))
-		.map((f) => f.replace(/\.json$/, ""));
+		.filter(f => f.endsWith(".json"))
+		.map(f => f.replace(/\.json$/, ""));
 }
 
 /** Find credentials whose serverUrl matches (normalized, trailing slash stripped). */
@@ -118,9 +118,8 @@ export async function pairWithBolt(
 	const pairData = (await pairRes.json()) as { code: string; expiresIn: number; serverFingerprint: string };
 	logger.info(`bolt pairing: received code for ${boltName} (expires in ${pairData.expiresIn}s)`);
 
-	// Step 2: generate the client keypair; clientId is the key fingerprint.
+	// Step 2: generate the client keypair.
 	const keypair = generateKeypair();
-	const clientId = fingerprint(keypair.publicKeyPem);
 
 	// Step 3: exchange keys.
 	const exchangeRes = await fetch(`${baseUrl}/pair/exchange`, {
@@ -249,7 +248,7 @@ export class BoltTransport implements MCPTransport {
 			const raw = await res.text();
 			const dataLine = raw
 				.split(/\r?\n/)
-				.find((l) => l.startsWith("data:"))
+				.find(l => l.startsWith("data:"))
 				?.slice(5)
 				.trim();
 			if (!dataLine) throw new Error(`bolt ${this.config.url}: empty SSE payload`);
@@ -268,8 +267,13 @@ export class BoltTransport implements MCPTransport {
 		return parsed.result as T;
 	}
 
-	async request<T = unknown>(method: string, params?: Record<string, unknown>, options?: MCPRequestOptions): Promise<T> {
-		if (options?.signal?.aborted) throw options.signal.reason instanceof Error ? options.signal.reason : new Error("Aborted");
+	async request<T = unknown>(
+		method: string,
+		params?: Record<string, unknown>,
+		options?: MCPRequestOptions,
+	): Promise<T> {
+		if (options?.signal?.aborted)
+			throw options.signal.reason instanceof Error ? options.signal.reason : new Error("Aborted");
 		return this.signedRequest<T>(method, params ?? {}, undefined);
 	}
 
@@ -280,7 +284,11 @@ export class BoltTransport implements MCPTransport {
 		const headers = signRequest(this.creds, "POST", url.pathname + url.search, body);
 		await fetch(url, {
 			method: "POST",
-			headers: { "Content-Type": "application/json", ...(this.sessionId ? { "Mcp-Session-Id": this.sessionId } : {}), ...headers },
+			headers: {
+				"Content-Type": "application/json",
+				...(this.sessionId ? { "Mcp-Session-Id": this.sessionId } : {}),
+				...headers,
+			},
 			body,
 			signal: AbortSignal.timeout(this.config.timeout ?? DEFAULT_TIMEOUT_MS),
 		}).catch(() => {});

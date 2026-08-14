@@ -6,12 +6,13 @@
 import * as path from "node:path";
 import * as url from "node:url";
 import { getProjectDir, logger, withTimeout } from "@oh-my-pi/pi-utils";
+import { createBoltTransport } from "./bolt";
 import { describeMCPTimeout, isMCPTimeoutEnabled, resolveMCPTimeoutMs } from "./timeout";
-import { createBoltTransport, BoltNotPairedError } from "./bolt";
 import { createHttpTransport } from "./transports/http";
 import { createSseTransport } from "./transports/sse";
 import { createStdioTransport } from "./transports/stdio";
 import type {
+	MCPBoltServerConfig,
 	MCPGetPromptParams,
 	MCPGetPromptResult,
 	MCPHttpServerConfig,
@@ -27,7 +28,6 @@ import type {
 	MCPResourcesListResult,
 	MCPResourceTemplate,
 	MCPResourceTemplatesListResult,
-	MCPBoltServerConfig,
 	MCPServerCapabilities,
 	MCPServerConfig,
 	MCPServerConnection,

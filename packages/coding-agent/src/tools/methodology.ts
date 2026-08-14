@@ -4,10 +4,10 @@ import {
 	coverageReport,
 	initMethodology,
 	loadMethodology,
+	type MethodologyPhaseRecord,
 	missingPrerequisites,
 	nextPhase,
 	setPhaseState,
-	type MethodologyPhaseRecord,
 } from "../pentest/methodology";
 import type { ToolSession } from "./index";
 import { ToolError } from "./tool-errors";
@@ -51,10 +51,7 @@ export class MethodologyTool implements AgentTool<typeof methodologySchema, Meth
 
 	constructor(readonly session: ToolSession) {}
 
-	async execute(
-		_toolCallId: string,
-		params: MethodologyParams,
-	): Promise<AgentToolResult<MethodologyToolDetails>> {
+	async execute(_toolCallId: string, params: MethodologyParams): Promise<AgentToolResult<MethodologyToolDetails>> {
 		switch (params.action) {
 			case "init": {
 				const state = initMethodology(params.target ?? "", params.out, params.force);

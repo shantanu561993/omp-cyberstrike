@@ -1503,7 +1503,7 @@ export class MCPManager {
 						const headers = { ...resolved.headers };
 						setGeneratedHeader(headers, "Authorization", `Bearer ${credential.access}`);
 						resolved = { ...resolved, headers };
-					} else {
+					} else if (resolved.type !== "bolt") {
 						resolved = {
 							...resolved,
 							env: {
@@ -1518,7 +1518,7 @@ export class MCPManager {
 			}
 		}
 
-		if (resolved.type !== "http" && resolved.type !== "sse") {
+		if (resolved.type !== "http" && resolved.type !== "sse" && resolved.type !== "bolt") {
 			// Literal env values (Agent Plugins §§4.1/9.2) are opaque package data:
 			// no env-name lookup, no `!command` execution, no dropping empty values.
 			if (resolved.env && resolved.envPolicy !== "literal") {
@@ -1529,7 +1529,7 @@ export class MCPManager {
 				}
 				resolved = { ...resolved, env: nextEnv };
 			}
-		} else {
+		} else if (resolved.type !== "bolt") {
 			// Origin-locked servers (Agent Plugins §9.2) carry literal header
 			// values: no placeholder or environment-variable expansion.
 			if (resolved.headers && resolved.headerPolicy !== "origin-locked") {

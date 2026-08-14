@@ -1177,7 +1177,11 @@ export class MCPCommandController {
 		// flow only applies to http/sse transports. Without this guard the
 		// unauthenticated preflight below spawns the child, which happily reuses
 		// its own cached tokens (e.g. mcp-remote's machine-wide ~/.mcp-auth) and
-		// produces the misleading "reauthorization is not required".
+		// produces the misleading "reauthorization is not required". Bolt servers
+		// pair with their own Ed25519 credentials — no OMP OAuth either.
+		if (config.type === "bolt") {
+			throw new Error("bolt servers pair with their own Ed25519 credentials, so OMP has no OAuth to reauthorize.");
+		}
 		if (config.type !== "http" && config.type !== "sse") {
 			const remoteUrl = config.args?.find(arg => /^https?:\/\//.test(arg));
 			const httpHint = `{ "type": "http", "url": ${JSON.stringify(remoteUrl ?? "<remote url>")} }`;

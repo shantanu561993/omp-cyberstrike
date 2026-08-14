@@ -1,9 +1,9 @@
-import { type } from "@oh-my-pi/omptype";
-import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-pi/pi-agent-core";
 import * as fs from "node:fs";
 import { dirname, join } from "node:path";
-import { appendLogEntry } from "../pentest/http-log";
+import { type } from "@oh-my-pi/omptype";
+import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-pi/pi-agent-core";
 import { getPentestDir } from "../pentest/assets";
+import { appendLogEntry } from "../pentest/http-log";
 import type { ToolSession } from "./index";
 import { ToolError } from "./tool-errors";
 import { clampTimeout } from "./tool-timeouts";
@@ -98,9 +98,13 @@ export class WebCrawlTool implements AgentTool<typeof webCrawlSchema, WebCrawlTo
 			}
 		}
 		if (!keyName && this.session.modelRegistry) {
-			const key = await this.session.modelRegistry.getApiKeyForProvider("deepseek", this.session.getSessionId?.(), {
-				forceRefresh: false,
-			});
+			const key = await this.session.modelRegistry.getApiKeyForProvider(
+				"deepseek",
+				this.session.getSessionId?.() ?? undefined,
+				{
+					forceRefresh: false,
+				},
+			);
 			if (key) keyName = "DEEPSEEK_API_KEY";
 		}
 		if (!keyName) {
@@ -121,7 +125,7 @@ export class WebCrawlTool implements AgentTool<typeof webCrawlSchema, WebCrawlTo
 		}
 
 		const args = ["--url", params.url];
-		for (const s of params.scope ?? []) args.push("--scope", s);
+		for (const s of (params.scope ?? []) as string[]) args.push("--scope", s);
 		args.push("--steps", String(params.steps ?? 10), "--out", outFile);
 		if (params.user && params.pass) args.push("--user", params.user, "--pass", params.pass);
 		if (params.selU) args.push("--sel-u", params.selU);

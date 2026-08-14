@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * One-time port of CyberStrike's web pentest skills + scanners into OMP's
  * in-source `packages/coding-agent/src/pentest` layout (non-recursive,
@@ -17,9 +18,9 @@
  * single-line scalars in the source); everything unknown is preserved verbatim.
  */
 
-import { mkdirSync, readdirSync, readFileSync, writeFileSync, copyFileSync, existsSync, statSync } from "node:fs";
-import { join, basename, dirname, relative } from "node:path";
 import { execSync } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, relative } from "node:path";
 
 const HELP = `Usage: bun scripts/port-cyberstrike-skills.ts --src <dir> --dst <dir>
 
@@ -259,31 +260,20 @@ const WSTG_FAMILY_ORDER = [
 	["apit", "API Testing"],
 ] as const;
 
-function wstgFamily(name: string): string | null {
-	for (const [prefix, label] of WSTG_FAMILY_ORDER) {
-		if (name.startsWith(`wstg-${prefix}`)) return label;
-	}
-	if (name === "wstg-injection") return "Composite: Injection";
-	if (name === "wstg-auth-session") return "Composite: Auth & Session";
-	if (name === "wstg-logic-client-api") return "Composite: Logic, Client & API";
-	if (name === "wstg-recon-config") return "Composite: Recon & Config";
-	return null;
-}
-
 function renderIndex(skills: PortedSkill[], src: string): string {
 	const lines: string[] = [];
 	lines.push("# Web Pentest Skill Index (ported from CyberStrike)");
 	lines.push("");
 	lines.push(`Source: \`${src}\` (see ATTRIBUTION.md for provenance and license).`);
 	lines.push("");
-	lines.push("Each skill is loaded on demand via \`skill://<name>\`. The \`web-pentest\`");
+	lines.push("Each skill is loaded on demand via `skill://<name>`. The `web-pentest`");
 	lines.push("umbrella skill maps every phase to the relevant skills below.");
 	lines.push("");
 	lines.push("## WSTG 4.2 families");
 	lines.push("");
 	let total = 0;
 	for (const [prefix, label] of WSTG_FAMILY_ORDER) {
-		const members = skills.filter((s) => s.name.startsWith(`wstg-${prefix}`));
+		const members = skills.filter(s => s.name.startsWith(`wstg-${prefix}`));
 		if (members.length === 0) continue;
 		lines.push(`### ${label} (${prefix})`);
 		lines.push("");
@@ -299,7 +289,9 @@ function renderIndex(skills: PortedSkill[], src: string): string {
 	lines.push("");
 	lines.push("| Skill | Description |");
 	lines.push("|---|---|");
-	for (const s of skills.filter((s) => ["wstg-injection", "wstg-auth-session", "wstg-logic-client-api", "wstg-recon-config"].includes(s.name))) {
+	for (const s of skills.filter(s =>
+		["wstg-injection", "wstg-auth-session", "wstg-logic-client-api", "wstg-recon-config"].includes(s.name),
+	)) {
 		lines.push(`| \`skill://${s.name}\` | ${s.description.replace(/\|/g, "\\|")} |`);
 		total++;
 	}
@@ -308,7 +300,7 @@ function renderIndex(skills: PortedSkill[], src: string): string {
 	lines.push("");
 	lines.push("| Skill | Description |");
 	lines.push("|---|---|");
-	for (const s of skills.filter((s) => s.name.startsWith("attack-")).sort((a, b) => a.name.localeCompare(b.name))) {
+	for (const s of skills.filter(s => s.name.startsWith("attack-")).sort((a, b) => a.name.localeCompare(b.name))) {
 		lines.push(`| \`skill://${s.name}\` | ${s.description.replace(/\|/g, "\\|")} |`);
 		total++;
 	}
@@ -317,7 +309,7 @@ function renderIndex(skills: PortedSkill[], src: string): string {
 	lines.push("");
 	lines.push("| Skill | Description |");
 	lines.push("|---|---|");
-	for (const s of skills.filter((s) => s.name === "recon-methodology")) {
+	for (const s of skills.filter(s => s.name === "recon-methodology")) {
 		lines.push(`| \`skill://${s.name}\` | ${s.description.replace(/\|/g, "\\|")} |`);
 		total++;
 	}
@@ -342,7 +334,7 @@ function main(argv: readonly string[]): void {
 	const skillFiles = walkSkillFiles(src);
 	if (skillFiles.length === 0) throw new Error(`no SKILL.md files found under ${src}`);
 	const seen = new Map<string, string>();
-	const skills = skillFiles.map((f) => portSkill(f, src, dst, seen));
+	const skills = skillFiles.map(f => portSkill(f, src, dst, seen));
 	skills.sort((a, b) => a.name.localeCompare(b.name));
 
 	// Scanners → <pentestRoot>/scanners.
@@ -408,11 +400,13 @@ Ported content MUST NOT be upstreamed into \`can1357/oh-my-pi\` without relicens
 	writeFileSync(join(umbrellaDir, "ATTRIBUTION.md"), attribution);
 
 	console.log(`Ported ${skills.length} skills from ${src} to ${dst}`);
-	console.log(`  WSTG: ${skills.filter((s) => s.name.startsWith("wstg-")).length}, attack: ${skills.filter((s) => s.name.startsWith("attack-")).length}, recon: ${skills.filter((s) => s.name === "recon-methodology").length}`);
+	console.log(
+		`  WSTG: ${skills.filter(s => s.name.startsWith("wstg-")).length}, attack: ${skills.filter(s => s.name.startsWith("attack-")).length}, recon: ${skills.filter(s => s.name === "recon-methodology").length}`,
+	);
 	console.log(`Copied ${copiedScanners} scanners to ${scannersDst}`);
 	console.log(`Wrote ${join(pentestRoot, "INDEX.md")} and ${join(pentestRoot, "ATTRIBUTION.md")}`);
 	console.log(`Source commit: ${commit}`);
-	const extraTotal = skills.filter((s) => s.extraFiles.length > 0).length;
+	const extraTotal = skills.filter(s => s.extraFiles.length > 0).length;
 	if (extraTotal > 0) console.warn(`WARN ${extraTotal} skill dirs had extra files (copied along)`);
 }
 

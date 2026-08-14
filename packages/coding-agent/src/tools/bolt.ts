@@ -1,15 +1,16 @@
-import { type } from "@oh-my-pi/omptype";
-import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-pi/pi-agent-core";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { type } from "@oh-my-pi/omptype";
+import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-pi/pi-agent-core";
 import {
+	type BoltCredentials,
+	BoltNotPairedError,
+	type BoltTransport,
 	createBoltTransport,
 	deleteBoltCredentials,
 	getBoltCredentials,
 	listBoltCredentials,
 	pairWithBolt,
-	BoltNotPairedError,
-	type BoltCredentials,
 } from "../mcp/bolt";
 import { appendLogEntry } from "../pentest/http-log";
 import type { ToolSession } from "./index";
@@ -72,7 +73,7 @@ export function boltServerStatus(
 
 export function renderServerStatus(rows: Array<{ name: string; status: string; url: string }>): string {
 	if (rows.length === 0) return "(no bolt.servers configured)";
-	return rows.map((r) => `- ${r.name}\t${r.status}\t${r.url}`).join("\n");
+	return rows.map(r => `- ${r.name}\t${r.status}\t${r.url}`).join("\n");
 }
 
 const boltDescription = `Native CyberStrike Bolt integration. Actions: pair (name url adminToken — runs the Ed25519 pairing flow, saves credentials to the agent dir, then RESTART or /mcp reconnect for the server's MCP tools); list (per-server connected/needs_auth/disabled/failed); remove (name — drop credentials); tools (name — list the server's remote tools); call (name tool jsonArgs — invoke a remote tool with JSON string args); run (name command — shortcut for the server's bash tool). Paired servers also expose MCP tools named mcp__<server>_<tool> once connected (bolt tool: list confirms). URL change invalidates credentials (re-pair demanded). With out (pentest dir) + phase, every call/run is mirrored into http.log (source: "bolt") and its output appended to <out>/remote/<phase>.log.`;
@@ -130,7 +131,7 @@ export class BoltTool implements AgentTool<typeof boltSchema, BoltToolDetails> {
 			case "run": {
 				if (!params.name) throw new ToolError(`bolt ${params.action} requires name`);
 				const entry = requireServer(servers, params.name);
-				let transport;
+				let transport: BoltTransport | undefined;
 				try {
 					transport = createBoltTransport({ url: entry.url, timeout: entry.timeout });
 				} catch (err) {
@@ -151,7 +152,7 @@ export class BoltTool implements AgentTool<typeof boltSchema, BoltToolDetails> {
 						const text =
 							(list.tools ?? []).length === 0
 								? `(server ${params.name} exposes no tools)`
-								: list.tools.map((t) => `- ${t.name}\t${t.description ?? ""}`).join("\n");
+								: list.tools.map(t => `- ${t.name}\t${t.description ?? ""}`).join("\n");
 						return { content: [{ type: "text", text }], details: { action: "tools", name: params.name } };
 					}
 					let toolName: string;
@@ -172,7 +173,7 @@ export class BoltTool implements AgentTool<typeof boltSchema, BoltToolDetails> {
 					// Real Bolt servers expose run_command instead of bash: fall back
 					// when the server reports the bash tool as unknown.
 					if (params.action === "run" && result.isError) {
-						const errText = (result.content ?? []).map((c) => c.text ?? "").join("\n");
+						const errText = (result.content ?? []).map(c => c.text ?? "").join("\n");
 						if (/unknown tool|tool not found/i.test(errText)) {
 							result = await transport.request<{
 								content?: Array<{ type: string; text?: string }>;
@@ -182,7 +183,7 @@ export class BoltTool implements AgentTool<typeof boltSchema, BoltToolDetails> {
 						}
 					}
 					const text = (result.content ?? [])
-						.map((c) => (c.type === "text" ? (c.text ?? "") : JSON.stringify(c)))
+						.map(c => (c.type === "text" ? (c.text ?? "") : JSON.stringify(c)))
 						.join("\n");
 
 					// AUTO-LOG + remote log mirror (when a pentest out dir is given).

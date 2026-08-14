@@ -1,7 +1,7 @@
-import { type } from "@oh-my-pi/omptype";
-import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-pi/pi-agent-core";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { type } from "@oh-my-pi/omptype";
+import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-pi/pi-agent-core";
 import { enumeratePythonRuntimes } from "../eval/py/runtime";
 import { getPentestDir } from "../pentest/assets";
 import type { ToolSession } from "./index";
@@ -34,7 +34,7 @@ export const ATTACK_SCANNERS = [
 export type AttackScanner = (typeof ATTACK_SCANNERS)[number];
 
 const attackScriptSchema = type({
-	script: ATTACK_SCANNERS.map((name) => `'${name}'`).join(" | "),
+	script: ATTACK_SCANNERS.map(name => `'${name}'`).join(" | "),
 	"args?": "string[]",
 	"timeout?": "number.integer >= 1",
 });
@@ -104,7 +104,7 @@ export class AttackScriptTool implements AgentTool<typeof attackScriptSchema, At
 
 		return {
 			content: [{ type: "text", text: sections.join("\n\n") }],
-			details: { script: params.script, exitCode, command: args.join(" ") },
+			details: { script: params.script as AttackScanner, exitCode, command: args.join(" ") },
 		};
 	}
 }

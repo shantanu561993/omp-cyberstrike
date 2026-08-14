@@ -17,7 +17,7 @@ const httpLogSchema = type({
 	action: "'append' | 'query' | 'read'",
 	"out?": "string",
 	"phase?": "string",
-	"source?": HTTP_LOG_SOURCES.map((s) => `'${s}'`).join(" | "),
+	"source?": HTTP_LOG_SOURCES.map(s => `'${s}'`).join(" | "),
 	"method?": "string",
 	"url?": "string",
 	"status?": "number.integer >= 100 | string",
@@ -48,10 +48,7 @@ export class HttpLogTool implements AgentTool<typeof httpLogSchema, HttpLogToolD
 
 	constructor(readonly session: ToolSession) {}
 
-	async execute(
-		_toolCallId: string,
-		params: HttpLogParams,
-	): Promise<AgentToolResult<HttpLogToolDetails>> {
+	async execute(_toolCallId: string, params: HttpLogParams): Promise<AgentToolResult<HttpLogToolDetails>> {
 		if (!params.out) throw new ToolError("http_log requires `out` (the pentest working directory)");
 
 		switch (params.action) {
@@ -61,12 +58,12 @@ export class HttpLogTool implements AgentTool<typeof httpLogSchema, HttpLogToolD
 				if (!params.url) throw new ToolError("append requires `url`");
 				if (params.status === undefined) throw new ToolError("append requires `status`");
 				const seq = appendLogEntry(params.out, {
-					source: params.source,
-					method: params.method,
-					url: params.url,
-					status: params.status,
-					phase: params.phase,
-					body: params.body,
+					source: params.source as string,
+					method: params.method as string,
+					url: params.url as string,
+					status: params.status as number | string,
+					phase: params.phase as string | undefined,
+					body: params.body as string | undefined,
 				});
 				return {
 					content: [{ type: "text", text: `logged seq ${seq} to ${params.out}/http.log` }],
@@ -75,11 +72,11 @@ export class HttpLogTool implements AgentTool<typeof httpLogSchema, HttpLogToolD
 			}
 			case "query": {
 				const entries = queryLogEntries(params.out, {
-					phase: params.phase,
-					source: params.source,
-					method: params.method,
-					url: params.url,
-					status: params.status,
+					phase: params.phase as string | undefined,
+					source: params.source as string | undefined,
+					method: params.method as string | undefined,
+					url: params.url as string | undefined,
+					status: params.status as number | string | undefined,
 				});
 				return {
 					content: [{ type: "text", text: renderLogEntries(entries) }],

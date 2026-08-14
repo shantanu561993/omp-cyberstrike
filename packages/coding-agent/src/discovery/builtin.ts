@@ -6,9 +6,7 @@
 import * as path from "node:path";
 import { getAgentDir, logger, parseFrontmatter, tryParseJson } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
-import { Settings } from "../config/settings";
 import { getManagedSkillsDir, MANAGED_SKILLS_PROVIDER_ID } from "../autolearn/managed-skills";
-import { getPentestDir } from "../pentest/assets";
 import { registerProvider } from "../capability";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
 import { type Extension, type ExtensionManifest, extensionCapability } from "../capability/extension";
@@ -25,6 +23,8 @@ import { type SlashCommand, slashCommandCapability } from "../capability/slash-c
 import { type SystemPrompt, systemPromptCapability } from "../capability/system-prompt";
 import { type CustomTool, toolCapability } from "../capability/tool";
 import type { LoadContext, LoadResult } from "../capability/types";
+import { Settings as OmpSettings } from "../config/settings";
+import { getPentestDir } from "../pentest/assets";
 import { expandTilde } from "../tools/path-utils";
 import {
 	buildRuleFromMarkdown,
@@ -249,8 +249,11 @@ async function loadBoltServers(ctx: LoadContext): Promise<LoadResult<MCPServer>>
 	const items: MCPServer[] = [];
 	const warnings: string[] = [];
 	try {
-		const settings = await Settings.init({ cwd: ctx.cwd });
-		const servers = settings.get("bolt.servers") as Record<string, { url: string; timeout?: number; enabled?: boolean }>;
+		const settings = await OmpSettings.init({ cwd: ctx.cwd });
+		const servers = settings.get("bolt.servers") as Record<
+			string,
+			{ url: string; timeout?: number; enabled?: boolean }
+		>;
 		for (const [name, entry] of Object.entries(servers ?? {})) {
 			if (!entry?.url) {
 				warnings.push(`bolt server "${name}": missing url — skipped`);
