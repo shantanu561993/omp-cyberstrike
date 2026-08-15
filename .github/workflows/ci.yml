@@ -451,8 +451,8 @@ jobs:
    # in parallel with the test fan-out and only publishing is held back.
    release_gate:
       name: Release validation gate
-      if: ${{ github.repository == 'can1357/oh-my-pi' && needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
-         needs.rust_validate.result == 'success' &&
+      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
+         (needs.rust_validate.result == 'success' || needs.rust_validate.result == 'skipped') &&
          needs.native_addons.result == 'success' &&
          needs.test_workspace.result == 'success' &&
          needs.test_coding_agent_singleton.result == 'success' &&
@@ -474,8 +474,9 @@ jobs:
    # GitHub release, core npm) is gated on release_gate downstream.
    release_binary:
       name: "Release binary: ${{ matrix.target_id }}"
-      if: ${{ github.repository == 'can1357/oh-my-pi' && needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
-         needs.native_addons.result == 'success' }}
+      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
+         needs.native_addons.result == 'success' &&
+         (github.repository == 'can1357/oh-my-pi' || matrix.target_id == 'linux-x64' || matrix.target_id == 'linux-arm64' || matrix.target_id == 'win32-x64') }}
       needs: [release_metadata, native_addons]
       strategy:
          fail-fast: false
@@ -537,7 +538,20 @@ jobs:
               path: ~/.bun/install/cache
               key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
          - run: bun install --frozen-lockfile
+         # Forks have no bazel-built artifact: install the platform addon from
+         # its published npm leaf (@oh-my-pi/pi-natives-<target_id>), which the
+         # build's embed step picks up from packages/natives/native.
+         - name: Install native addons from npm (fork)
+           if: github.repository != 'can1357/oh-my-pi'
+           shell: bash
+           run: |
+              set -euo pipefail
+              tarball="$(npm view "@oh-my-pi/pi-natives-${{ matrix.target_id }}" dist.tarball)"
+              curl -fsSL --retry 3 "$tarball" | tar -xz -C "$RUNNER_TEMP"
+              mkdir -p packages/natives/native
+              cp "$RUNNER_TEMP/package/"*.node packages/natives/native/
          - name: Install prebuilt native addon(s)
+           if: github.repository == 'can1357/oh-my-pi'
            uses: ./.github/actions/native-artifacts
            with:
               targets: ${{ matrix.native_targets }}
@@ -580,7 +594,7 @@ jobs:
    # moment the release run is detected, fully overlapped with the tests.
    release_binary_darwin:
       name: "Release binary: ${{ matrix.target_id }}"
-      if: ${{ github.repository == 'can1357/oh-my-pi' && needs.release_metadata.outputs.is-release == 'true' && !cancelled() }}
+      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() }}
       needs: [release_metadata]
       strategy:
          fail-fast: false
@@ -614,10 +628,22 @@ jobs:
               path: ~/.bun/install/cache
               key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
          - run: bun install --frozen-lockfile
+         # Forks have no bazel-built addon: use the published npm leaf (see
+         # release_binary). The embed step picks it up from packages/natives/native.
+         - name: Install native addons from npm (fork)
+           if: github.repository != 'can1357/oh-my-pi'
+           shell: bash
+           run: |
+              set -euo pipefail
+              tarball="$(npm view "@oh-my-pi/pi-natives-${{ matrix.target_id }}" dist.tarball)"
+              curl -fsSL --retry 3 "$tarball" | tar -xz -C "$RUNNER_TEMP"
+              mkdir -p packages/natives/native
+              cp "$RUNNER_TEMP/package/"*.node packages/natives/native/
          # Darwin runners build their own architecture; cross-hosted artifacts
          # do not exist for macOS. The warm workflow keeps these scopes seeded
          # near HEAD, so this is normally the version-bump delta.
          - name: Build native addon (bazel)
+           if: github.repository == 'can1357/oh-my-pi'
            uses: ./.github/actions/bazel-natives
            with:
               targets: ${{ matrix.native_targets }}
@@ -725,7 +751,7 @@ jobs:
 
    release_github:
       name: Publish GitHub release
-      if: ${{ github.repository == 'can1357/oh-my-pi' && needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
+      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_gate.result == 'success' &&
          needs.release_binary.result == 'success' &&
          needs.release_binary_darwin.result == 'success' }}
