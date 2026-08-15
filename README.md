@@ -104,10 +104,13 @@ bun --cwd=packages/hackbrowser run build      # crawl.mjs + session-bot.mjs bund
 cd packages/coding-agent && bun run build     # dist/omp compiled binary (Linux)
 ```
 
-The compiled binary is self-contained for skills/scanners/crawl (assets staged
-from `PI_COMPILED`); crawling additionally needs a workspace `node_modules`
-with playwright reachable from the binary (linked automatically when the
-binary runs inside a checkout).
+The compiled binary is self-contained for skills/scanners/crawl code:
+`playwright` + `playwright-core` are embedded (extracted from a base64 tar.gz
+into the staged runtime dir on first use). The ~170 MB browser builds are
+platform-specific and ship separately as `omp-browser-deps-<platform>.tar.gz`
+release assets — drop the file next to the executable and `web_crawl`
+auto-extracts it into `browser-deps/` on first run (or set
+`PLAYWRIGHT_BROWSERS_PATH` yourself).
 
 ## Updating from upstream
 
