@@ -117,6 +117,7 @@ export const taskItemSchema = type({
 	task: "string",
 	"outputSchema?": outputSchemaInputSchema,
 	"schemaMode?": '"permissive" | "strict"',
+	"autoloadSkills?": "string[]",
 	"+": "delete",
 });
 const taskItemSchemaIsolated = type({
@@ -125,6 +126,7 @@ const taskItemSchemaIsolated = type({
 	task: "string",
 	"outputSchema?": outputSchemaInputSchema,
 	"schemaMode?": '"permissive" | "strict"',
+	"autoloadSkills?": "string[]",
 	"isolated?": "boolean",
 	"+": "delete",
 });
@@ -145,6 +147,8 @@ export interface TaskItem {
 	schemaMode?: "permissive" | "strict";
 	/** Run this spawn in an isolated worktree (batch form; flat form carries it top-level). */
 	isolated?: boolean;
+	/** Skill names to preload into this subagent; replaces the agent's autoloadSkills frontmatter for this spawn. Unknown names (not active in this session) are ignored. */
+	autoloadSkills?: string[];
 }
 
 export const taskSchema = type({
@@ -153,6 +157,7 @@ export const taskSchema = type({
 	task: "string",
 	"outputSchema?": outputSchemaInputSchema,
 	"schemaMode?": '"permissive" | "strict"',
+	"autoloadSkills?": "string[]",
 	"isolated?": "boolean",
 	"+": "delete",
 });
@@ -162,6 +167,7 @@ const taskSchemaNoIsolation = type({
 	task: "string",
 	"outputSchema?": outputSchemaInputSchema,
 	"schemaMode?": '"permissive" | "strict"',
+	"autoloadSkills?": "string[]",
 	"+": "delete",
 });
 const taskSchemaBatch = type({
@@ -209,6 +215,7 @@ function createTaskSchema(options: {
 				...effortField,
 				"outputSchema?": outputSchemaInputSchema,
 				"schemaMode?": '"permissive" | "strict"',
+				"autoloadSkills?": "string[]",
 				"isolated?": "boolean",
 				"+": "delete",
 			});
@@ -225,6 +232,7 @@ function createTaskSchema(options: {
 			...effortField,
 			"outputSchema?": outputSchemaInputSchema,
 			"schemaMode?": '"permissive" | "strict"',
+			"autoloadSkills?": "string[]",
 			"+": "delete",
 		});
 		return type.raw({
@@ -241,6 +249,7 @@ function createTaskSchema(options: {
 			...effortField,
 			"outputSchema?": outputSchemaInputSchema,
 			"schemaMode?": '"permissive" | "strict"',
+			"autoloadSkills?": "string[]",
 			"isolated?": "boolean",
 			"+": "delete",
 		});
@@ -252,6 +261,7 @@ function createTaskSchema(options: {
 		...effortField,
 		"outputSchema?": outputSchemaInputSchema,
 		"schemaMode?": '"permissive" | "strict"',
+		"autoloadSkills?": "string[]",
 		"+": "delete",
 	});
 }
@@ -302,6 +312,8 @@ export interface TaskParams {
 	context?: string;
 	/** Run in an isolated worktree (flat form; per-item in batch form). */
 	isolated?: boolean;
+	/** Skill names to preload into this subagent (flat form); replaces the agent's autoloadSkills frontmatter for this spawn. Unknown names (not active in this session) are ignored. */
+	autoloadSkills?: string[];
 }
 
 /**

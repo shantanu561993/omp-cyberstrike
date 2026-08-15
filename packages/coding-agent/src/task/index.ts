@@ -279,6 +279,7 @@ function resolveSpawnItems(params: TaskParams): TaskItem[] {
 	if ("schemaMode" in params) item.schemaMode = params.schemaMode;
 	if ("effort" in params) item.effort = params.effort;
 	if ("isolated" in params) item.isolated = params.isolated;
+	if ("autoloadSkills" in params) item.autoloadSkills = params.autoloadSkills;
 	return [item];
 }
 
@@ -304,6 +305,7 @@ function spawnParamsFor(params: TaskParams, item: TaskItem, defaultAgent: string
 	} else if ("isolated" in params) {
 		spawn.isolated = params.isolated;
 	}
+	if ("autoloadSkills" in item) spawn.autoloadSkills = item.autoloadSkills;
 	return spawn;
 }
 
@@ -1424,6 +1426,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				...(Object.hasOwn(params, "outputSchema") ? { outputSchema: params.outputSchema } : {}),
 				...(Object.hasOwn(params, "schemaMode") ? { schemaMode: params.schemaMode } : {}),
 				...(params.effort !== undefined ? { effort: params.effort } : {}),
+				...(Object.hasOwn(params, "autoloadSkills") ? { autoloadSkills: params.autoloadSkills } : {}),
 				identity: { id: preAllocatedId, label: params.name },
 				index: spawnIndex,
 				parentToolCallId: toolCallId,

@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { Skill } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
 import {
 	artifactsDirsFromRegistry,
 	resetRegisteredArtifactDirsForTests,
@@ -30,6 +31,22 @@ const AGENT: AgentDefinition = {
 	output: { type: "object", properties: { agent: { type: "boolean" } } },
 };
 
+const reconSkill: Skill = {
+	name: "recon",
+	description: "Recon checklist",
+	filePath: "/skills/recon.md",
+	baseDir: "/skills",
+	source: "bundled",
+};
+
+const injectionSkill: Skill = {
+	name: "injection",
+	description: "Injection checklist",
+	filePath: "/skills/injection.md",
+	baseDir: "/skills",
+	source: "bundled",
+};
+
 function session(
 	options: {
 		planMode?: boolean;
@@ -44,6 +61,7 @@ function session(
 		cwd: "/tmp",
 		hasUI: false,
 		outputSchema: options.outputSchema,
+		skills: [reconSkill, injectionSkill],
 		settings: Settings.isolated({
 			"task.maxRecursionDepth": options.maxDepth ?? 2,
 			"task.isolation.mode": options.isolationMode ?? "none",
@@ -579,6 +597,49 @@ describe("structured subagent primitive", () => {
 		expect(settled.mergeSummary).toContain("/recovery/Worker.patch");
 		expect(artifactsDirsFromRegistry()).toContain(settled.artifactsDir);
 		expect(await fs.stat(artifactsDir ?? "")).toBeDefined();
+		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
+	});
+
+	it("request autoloadSkills replace the agent frontmatter list", async () => {
+		mockDiscovery({ ...AGENT, autoloadSkills: ["recon"] });
+		const dispatched: executorModule.ExecutorOptions[] = [];
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			dispatched.push(options);
+			return result();
+		});
+
+		const settled = await runStructuredSubagent(request({ autoloadSkills: ["injection"] }));
+
+		expect(dispatched[0]?.autoloadSkills?.map(skill => skill.name)).toEqual(["injection"]);
+		expect(dispatched[0]?.autoloadSkills?.map(skill => skill.name)).not.toContain("recon");
+		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
+	});
+
+	it("empty request autoloadSkills disables autoload", async () => {
+		mockDiscovery({ ...AGENT, autoloadSkills: ["recon"] });
+		const dispatched: executorModule.ExecutorOptions[] = [];
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			dispatched.push(options);
+			return result();
+		});
+
+		const settled = await runStructuredSubagent(request({ autoloadSkills: [] }));
+
+		expect(dispatched[0]?.autoloadSkills).toEqual([]);
+		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
+	});
+
+	it("absent request autoloadSkills falls back to the agent frontmatter list", async () => {
+		mockDiscovery({ ...AGENT, autoloadSkills: ["recon"] });
+		const dispatched: executorModule.ExecutorOptions[] = [];
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			dispatched.push(options);
+			return result();
+		});
+
+		const settled = await runStructuredSubagent(request());
+
+		expect(dispatched[0]?.autoloadSkills?.map(skill => skill.name)).toEqual(["recon"]);
 		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
 	});
 });

@@ -74,8 +74,8 @@ const EMBEDDED_AGENT_DEFS: EmbeddedAgentDef[] = [
 		},
 		template: taskMd,
 	},
-	// web-pentester carries its own frontmatter (tools, autoloadSkills, output
-	// schema) — no def.frontmatter, so the file's frontmatter is preserved.
+	// web-pentester carries its own frontmatter (tools, output schema) — no
+	// def.frontmatter, so the file's frontmatter is preserved.
 	{ fileName: "web-pentester.md", template: webPentesterMd },
 ];
 

@@ -91,6 +91,8 @@ export interface StructuredSubagentRequest {
 	schemaMode?: StructuredSubagentSchemaMode;
 	/** Per-spawn thinking effort mapped onto the resolved model's supported range; overrides the agent's default selector. */
 	effort?: TaskEffort;
+	/** Skill names to autoload into the child; replaces the agent's frontmatter list. */
+	autoloadSkills?: string[];
 	identity?: StructuredSubagentIdentity;
 	index?: number;
 	parentToolCallId?: string;
@@ -362,10 +364,11 @@ async function leaseArtifacts(
 	return { sessionFile: null, artifactsDir, temporary: true, unregister: registerArtifactsDir(artifactsDir) };
 }
 
-function resolveAutoloadSkills(session: ToolSession, agent: AgentDefinition) {
+function resolveAutoloadSkills(session: ToolSession, agent: AgentDefinition, requestedNames?: string[]) {
 	const skills = [...(session.skills ?? [])];
-	const autoloadSkills = agent.autoloadSkills?.length
-		? agent.autoloadSkills.map(name => skills.find(skill => skill.name === name)).filter(skill => skill !== undefined)
+	const names = requestedNames !== undefined ? requestedNames : agent.autoloadSkills;
+	const autoloadSkills = names?.length
+		? names.map(name => skills.find(skill => skill.name === name)).filter(skill => skill !== undefined)
 		: [];
 	return { skills, autoloadSkills };
 }
@@ -377,7 +380,7 @@ function buildExecutorOptions(
 	id: string,
 ): ExecutorOptions {
 	const { session } = request;
-	const { skills, autoloadSkills } = resolveAutoloadSkills(session, policy.agent);
+	const { skills, autoloadSkills } = resolveAutoloadSkills(session, policy.agent, request.autoloadSkills);
 	const localProtocolOptions: LocalProtocolOptions = session.localProtocolOptions ?? {
 		getArtifactsDir: session.getArtifactsDir ?? (() => null),
 		getSessionId: session.getSessionId ?? (() => null),

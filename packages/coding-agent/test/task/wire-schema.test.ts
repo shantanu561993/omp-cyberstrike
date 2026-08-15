@@ -97,6 +97,21 @@ describe("task wire schema", () => {
 		expect("role" in item).toBe(false);
 		expect(item.task).toBe("x");
 	});
+
+	it("accepts and keeps autoloadSkills in flat and batch shapes", () => {
+		const flat = getTaskSchema({ isolationEnabled: false, batchEnabled: false });
+		const flatParsed = flat({ task: "x", autoloadSkills: ["recon", "injection"] });
+		expect(flatParsed instanceof type.errors).toBe(false);
+		if (typeof flatParsed === "object" && flatParsed !== null) {
+			expect("autoloadSkills" in flatParsed ? flatParsed.autoloadSkills : undefined).toEqual(["recon", "injection"]);
+		} else {
+			throw new Error("expected an object parse result");
+		}
+
+		const batch = getTaskSchema({ isolationEnabled: false, batchEnabled: true });
+		const items = parsedItems(batch({ context: "ctx", tasks: [{ task: "x", autoloadSkills: ["recon"] }] }));
+		expect(items[0]?.autoloadSkills).toEqual(["recon"]);
+	});
 });
 
 // Contract: `agent` and `name` shape the spawned subagent's identity and the

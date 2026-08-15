@@ -29,6 +29,7 @@ Agents marked BLOCKING run inline — results return in this call; non-blocking 
 {{/if}}
   - `outputSchema`: Invocation-specific JSON Schema. Overrides the selected agent and parent-session schemas.
   - `schemaMode`: `"permissive"` (default) accepts a retry-exhausted invalid result with a warning; `"strict"` fails it.
+  - `autoloadSkills`: Skill names to preload into this subagent (replaces the agent's `autoloadSkills` frontmatter for this spawn). Only names active in this session load; unknown names are ignored.
 {{#if isolationEnabled}}
 {{#if applyIsolatedChanges}}
   - `isolated`: Run in a dedicated worktree; successful changes are automatically applied to the parent checkout.
@@ -44,6 +45,7 @@ Agents marked BLOCKING run inline — results return in this call; non-blocking 
 {{/if}}
 - `outputSchema`: Invocation-specific JSON Schema. Overrides the selected agent and parent-session schemas.
 - `schemaMode`: `"permissive"` (default) accepts a retry-exhausted invalid result with a warning; `"strict"` fails it.
+- `autoloadSkills`: Skill names to preload into this subagent (replaces the agent's `autoloadSkills` frontmatter for this spawn). Only names active in this session load; unknown names are ignored.
 {{#if isolationEnabled}}
 {{#if applyIsolatedChanges}}
 - `isolated`: Run in a dedicated worktree; successful changes are automatically applied to the parent checkout.
