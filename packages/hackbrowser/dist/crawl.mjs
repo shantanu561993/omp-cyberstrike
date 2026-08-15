@@ -2051,8 +2051,8 @@ var require_src = __commonJS((exports) => {
 });
 
 // crawl.ts
+import { existsSync as existsSync2, mkdirSync, writeFileSync } from "fs";
 import { createServer } from "http";
-import { writeFileSync, existsSync as existsSync2, mkdirSync } from "fs";
 import { join } from "path";
 
 // ../../node_modules/@ai-sdk/provider/dist/index.mjs
@@ -22799,12 +22799,16 @@ function createOpenAI(options = {}) {
 var openai = createOpenAI();
 
 // src/api.ts
-import path from "path";
 import { existsSync } from "fs";
+import path from "path";
 import { chromium as chromium2 } from "playwright";
 
 // src/agent.ts
 import { chromium } from "playwright";
+
+// src/auth.ts
+import fs from "fs";
+import readline from "readline";
 
 // src/log.ts
 var LEVEL_PRIORITY = {
@@ -22820,12 +22824,12 @@ function defaultStderrSink(record3) {
   let line = `${ts} ${record3.level} ${record3.service} ${record3.message}`;
   if (record3.extra && Object.keys(record3.extra).length > 0) {
     try {
-      line += " " + JSON.stringify(record3.extra);
+      line += ` ${JSON.stringify(record3.extra)}`;
     } catch {
       line += " [unserializable extra]";
     }
   }
-  process.stderr.write(line + `
+  process.stderr.write(`${line}
 `);
 }
 function shouldLog(level) {
@@ -22876,6 +22880,335 @@ var Log;
   }
   Log.create = create;
 })(Log ||= {});
+
+// src/auth.ts
+var log = Log.create({ service: "hackbrowser:auth" });
+async function loadSession(context, filePath) {
+  if (!fs.existsSync(filePath)) {
+    log.info("no session file found", { file: filePath });
+    return false;
+  }
+  try {
+    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    if (data.cookies) {
+      await context.addCookies(data.cookies);
+    }
+    log.info("session loaded", { file: filePath });
+    return true;
+  } catch (err) {
+    log.error("failed to load session", { file: filePath, err: String(err) });
+    return false;
+  }
+}
+async function waitForHuman(prompt) {
+  return new Promise((resolve2) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(`
+[human] ${prompt} `, (answer) => {
+      rl.close();
+      resolve2(answer.trim());
+    });
+  });
+}
+async function handle2FA(page) {
+  const mfaSelectors = [
+    'input[name*="otp"]',
+    'input[name*="mfa"]',
+    'input[name*="totp"]',
+    'input[name*="2fa"]',
+    'input[name*="verification"]',
+    'input[placeholder*="verification code" i]',
+    'input[placeholder*="auth code" i]',
+    'input[placeholder*="one-time" i]',
+    'input[placeholder*="otp" i]',
+    'input[autocomplete="one-time-code"]'
+  ];
+  for (const sel of mfaSelectors) {
+    const el = await page.$(sel);
+    if (el) {
+      log.info("2FA detected", { selector: sel });
+      const code = await waitForHuman("Enter your 2FA code and press Enter:");
+      await el.fill(code);
+      const form = await page.$("form");
+      if (form) {
+        const submitBtn = await form.$('button[type="submit"], input[type="submit"], button:not([type])');
+        if (submitBtn)
+          await submitBtn.click();
+      }
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      return true;
+    }
+  }
+  return false;
+}
+var savedBtnPos = null;
+async function waitForManualLogin(page, label, progress) {
+  let resolveReady;
+  const readyPromise = new Promise((resolve2) => {
+    resolveReady = resolve2;
+  });
+  const callbackName = label ? `__cyberstrikeReady_${label}` : "__cyberstrikeReady";
+  await page.exposeFunction(callbackName, () => {
+    resolveReady();
+  });
+  const posCallbackName = label ? `__cyberstrikePos_${label}` : "__cyberstrikePos";
+  await page.exposeFunction(posCallbackName, (left, top) => {
+    savedBtnPos = { left, top };
+  });
+  const isFinal = !progress || progress.index >= progress.total - 1;
+  const step = progress ? ` (${progress.index + 1}/${progress.total})` : "";
+  const who = label ? label.toUpperCase() : "LOGIN";
+  const topLine = isFinal ? `// ${who}${step} · LOGIN MANUALLY ⟶ START SCAN` : `// ${who}${step} · LOGIN MANUALLY ⟶ CONFIRM & NEXT`;
+  const buttonText = isFinal ? "START SCAN" : "CONFIRM & NEXT ⟶";
+  const buttonId = label ? `__cyberstrike-ready-btn-${label}` : "__cyberstrike-ready-btn";
+  const styleId = "__cyberstrike-ready-btn-style";
+  const injectButton = async () => {
+    await page.evaluate(({ btnId, btnText, topText, cbName, styleElId, posCb, savedPos, isFinal: isFinal2 }) => {
+      if (document.getElementById(btnId))
+        return;
+      if (!document.getElementById(styleElId)) {
+        const style = document.createElement("style");
+        style.id = styleElId;
+        style.textContent = `
+          @keyframes __cs-btn-pulse { 0%, 100% { opacity: 0.55; transform: scale(1); } 50% { opacity: 1; transform: scale(1.15); } }
+          #${btnId}:hover { box-shadow: 0 0 0 1px rgba(34,211,238,0.35), 0 0 28px rgba(34,211,238,0.45), 0 8px 24px rgba(0,0,0,0.6) !important; background: #0e141c !important; }
+          #${btnId}:active { transform: translateY(1px); }
+          #${btnId} .__cs-br { position: absolute; width: 8px; height: 8px; pointer-events: none; }
+          #${btnId} .__cs-br::before, #${btnId} .__cs-br::after { content: ""; position: absolute; background: #22d3ee; }
+          #${btnId} .__cs-br.tl::before { top: 0; left: 0; width: 8px; height: 1px; }
+          #${btnId} .__cs-br.tl::after  { top: 0; left: 0; width: 1px; height: 8px; }
+          #${btnId} .__cs-br.tr::before { top: 0; right: 0; width: 8px; height: 1px; }
+          #${btnId} .__cs-br.tr::after  { top: 0; right: 0; width: 1px; height: 8px; }
+          #${btnId} .__cs-br.bl::before { bottom: 0; left: 0; width: 8px; height: 1px; }
+          #${btnId} .__cs-br.bl::after  { bottom: 0; left: 0; width: 1px; height: 8px; }
+          #${btnId} .__cs-br.br::before { bottom: 0; right: 0; width: 8px; height: 1px; }
+          #${btnId} .__cs-br.br::after  { bottom: 0; right: 0; width: 1px; height: 8px; }
+          #${btnId} .__cs-br.tl { top: -1px; left: -1px; }
+          #${btnId} .__cs-br.tr { top: -1px; right: -1px; }
+          #${btnId} .__cs-br.bl { bottom: -1px; left: -1px; }
+          #${btnId} .__cs-br.br { bottom: -1px; right: -1px; }
+        `;
+        document.head.appendChild(style);
+      }
+      const btn = document.createElement("div");
+      btn.id = btnId;
+      btn.style.cssText = [
+        "all: initial",
+        "position: fixed",
+        "top: 16px",
+        "right: 16px",
+        "z-index: 2147483647",
+        "display: flex",
+        "flex-direction: column",
+        "align-items: flex-start",
+        "gap: 4px",
+        "padding: 10px 16px 10px 14px",
+        "background: #0b0f14",
+        "border: 1px solid #1f2937",
+        "color: #e5e7eb",
+        "font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, Consolas, ui-monospace, monospace",
+        "cursor: grab",
+        "user-select: none",
+        "touch-action: none",
+        "box-shadow: 0 0 0 1px rgba(34,211,238,0.15), 0 0 20px rgba(34,211,238,0.25), 0 8px 24px rgba(0,0,0,0.5)",
+        "transition: box-shadow 180ms ease-out, background 180ms ease-out",
+        "-webkit-font-smoothing: antialiased"
+      ].join(";");
+      if (savedPos) {
+        btn.style.left = `${savedPos.left}px`;
+        btn.style.top = `${savedPos.top}px`;
+        btn.style.right = "auto";
+      }
+      for (const corner of ["tl", "tr", "bl", "br"]) {
+        const b = document.createElement("span");
+        b.className = `__cs-br ${corner}`;
+        btn.appendChild(b);
+      }
+      const topRow = document.createElement("span");
+      topRow.style.cssText = "display: flex; align-items: center; gap: 8px;";
+      const grip = document.createElement("span");
+      grip.textContent = "⠿";
+      grip.setAttribute("aria-hidden", "true");
+      grip.style.cssText = "font-size: 12px; color: #22d3ee; opacity: 0.55; cursor: grab;";
+      const meta = document.createElement("span");
+      meta.textContent = topText;
+      meta.style.cssText = [
+        "font-size: 9px",
+        "letter-spacing: 0.12em",
+        "color: #22d3ee",
+        "opacity: 0.75",
+        "text-transform: uppercase"
+      ].join(";");
+      topRow.appendChild(grip);
+      topRow.appendChild(meta);
+      btn.appendChild(topRow);
+      const action = document.createElement("button");
+      action.type = "button";
+      action.setAttribute("aria-label", isFinal2 ? "Start scan" : "Confirm login and open next");
+      action.style.cssText = [
+        "all: unset",
+        "display: flex",
+        "align-items: center",
+        "gap: 8px",
+        "cursor: pointer",
+        "padding: 2px 0"
+      ].join(";");
+      const dot = document.createElement("span");
+      dot.style.cssText = [
+        "display: inline-block",
+        "width: 7px",
+        "height: 7px",
+        "border-radius: 50%",
+        "background: #22d3ee",
+        "box-shadow: 0 0 0 1px rgba(34,211,238,0.35), 0 0 8px rgba(34,211,238,0.8)",
+        "animation: __cs-btn-pulse 1.4s ease-in-out infinite"
+      ].join(";");
+      const txt = document.createElement("span");
+      txt.textContent = btnText;
+      txt.style.cssText = [
+        "font-size: 12px",
+        "font-weight: 600",
+        "letter-spacing: 0.14em",
+        "color: #22d3ee",
+        "text-transform: uppercase"
+      ].join(";");
+      action.appendChild(dot);
+      action.appendChild(txt);
+      btn.appendChild(action);
+      const hint = document.createElement("span");
+      hint.textContent = "drag ⠿ to move";
+      hint.style.cssText = [
+        "font-size: 8px",
+        "letter-spacing: 0.1em",
+        "color: #6b7280",
+        "margin-top: 1px"
+      ].join(";");
+      btn.appendChild(hint);
+      let dragging = false;
+      let moved = false;
+      let sx = 0;
+      let sy = 0;
+      let ox = 0;
+      let oy = 0;
+      let dragEndedAt = 0;
+      btn.addEventListener("pointerdown", (e) => {
+        if (action.contains(e.target))
+          return;
+        dragging = true;
+        moved = false;
+        const r = btn.getBoundingClientRect();
+        ox = r.left;
+        oy = r.top;
+        sx = e.clientX;
+        sy = e.clientY;
+        btn.style.left = `${ox}px`;
+        btn.style.top = `${oy}px`;
+        btn.style.right = "auto";
+        btn.style.cursor = "grabbing";
+        btn.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+      btn.addEventListener("pointermove", (e) => {
+        if (!dragging)
+          return;
+        const dx = e.clientX - sx;
+        const dy = e.clientY - sy;
+        if (Math.abs(dx) + Math.abs(dy) > 4)
+          moved = true;
+        const w = btn.offsetWidth;
+        const h = btn.offsetHeight;
+        btn.style.left = `${Math.max(0, Math.min(window.innerWidth - w, ox + dx))}px`;
+        btn.style.top = `${Math.max(0, Math.min(window.innerHeight - h, oy + dy))}px`;
+      });
+      const endDrag = (e) => {
+        if (!dragging)
+          return;
+        dragging = false;
+        btn.style.cursor = "grab";
+        try {
+          btn.releasePointerCapture(e.pointerId);
+        } catch {}
+        if (moved) {
+          dragEndedAt = Date.now();
+          const r = btn.getBoundingClientRect();
+          window[posCb](r.left, r.top);
+        }
+      };
+      btn.addEventListener("pointerup", endDrag);
+      btn.addEventListener("pointercancel", endDrag);
+      action.addEventListener("click", () => {
+        if (Date.now() - dragEndedAt < 350)
+          return;
+        window[cbName]();
+        meta.textContent = isFinal2 ? "// SCANNING…" : "// LOGIN CONFIRMED";
+        txt.textContent = isFinal2 ? "INITIATED" : "NEXT LOGIN ⟶";
+        dot.style.animation = "none";
+        dot.style.background = "#6b7280";
+        dot.style.boxShadow = "none";
+        txt.style.color = "#9ca3af";
+        meta.style.color = "#6b7280";
+        action.style.cursor = "default";
+        btn.style.cursor = "default";
+        btn.style.opacity = "0.7";
+        hint.style.display = "none";
+      });
+      document.body.appendChild(btn);
+      {
+        const w = btn.offsetWidth;
+        const h = btn.offsetHeight;
+        const curLeft = parseFloat(btn.style.left || "");
+        const curTop = parseFloat(btn.style.top || "");
+        if (!Number.isNaN(curLeft))
+          btn.style.left = `${Math.max(0, Math.min(window.innerWidth - w, curLeft))}px`;
+        if (!Number.isNaN(curTop))
+          btn.style.top = `${Math.max(0, Math.min(window.innerHeight - h, curTop))}px`;
+      }
+    }, {
+      btnId: buttonId,
+      btnText: buttonText,
+      topText: topLine,
+      cbName: callbackName,
+      styleElId: styleId,
+      posCb: posCallbackName,
+      savedPos: savedBtnPos,
+      isFinal
+    }).catch(() => {});
+  };
+  await injectButton();
+  page.on("load", injectButton);
+  log.info("waiting for manual login", { label: label ?? "default" });
+  await readyPromise;
+  page.removeListener("load", injectButton);
+  await page.evaluate((btnId) => {
+    document.getElementById(btnId)?.remove();
+  }, buttonId).catch(() => {});
+  log.info("manual login confirmed", { label: label ?? "default" });
+}
+async function autoLogin(page, credentials, opts) {
+  const userSel = credentials.usernameSelector ?? 'input[type="text"], input[type="email"], input[name*="user"], input[name*="email"], input[id*="user"], input[id*="email"]';
+  const passSel = credentials.passwordSelector ?? 'input[type="password"]';
+  try {
+    await page.waitForSelector(userSel, { timeout: 5000 });
+    await page.fill(userSel, credentials.username);
+    await page.fill(passSel, credentials.password);
+    const submitBtn = await page.$('button[type="submit"], input[type="submit"], button:not([type])');
+    if (submitBtn) {
+      await submitBtn.click();
+    } else {
+      await page.keyboard.press("Enter");
+    }
+    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    log.info("auto-login attempted", { username: credentials.username });
+    await handle2FA(page);
+  } catch (err) {
+    if (opts?.headless) {
+      log.warn("auto-login failed on the seed page; continuing anonymous (headless)", { err: String(err) });
+      return;
+    }
+    log.warn("auto-login failed, falling back to manual login", { err: String(err) });
+    await waitForManualLogin(page);
+  }
+}
 
 // src/capture.ts
 async function snapshotPageUI(page, trigger, componentPath = "") {
@@ -23135,8 +23468,206 @@ function flattenObject(obj, prefix, out) {
   }
 }
 
+// src/upload-samples.ts
+var nodeBuffer = globalThis.Buffer;
+var b64 = (s) => nodeBuffer.from(s, "base64");
+var txt = (s) => nodeBuffer.from(s, "utf8");
+var SAMPLES = [
+  {
+    name: "sample.png",
+    ext: "png",
+    mimeType: "image/png",
+    buffer: b64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGJgAQAAAAUAAaX2RUAAAAAASUVORK5CYII=")
+  },
+  {
+    name: "sample.jpg",
+    ext: "jpg",
+    mimeType: "image/jpeg",
+    buffer: b64("/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAA//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AfwD/2Q==")
+  },
+  {
+    name: "sample.pdf",
+    ext: "pdf",
+    mimeType: "application/pdf",
+    buffer: b64("JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4+ZW5kb2JqCjIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PmVuZG9iagozIDAgb2JqPDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgMjAwIDIwMF0+PmVuZG9iagp0cmFpbGVyPDwvUm9vdCAxIDAgUj4+CiUlRU9GCg==")
+  },
+  { name: "sample.csv", ext: "csv", mimeType: "text/csv", buffer: txt(`name,email
+Test User,test@example.com
+`) },
+  { name: "sample.txt", ext: "txt", mimeType: "text/plain", buffer: txt(`sample text file
+`) },
+  { name: "sample.json", ext: "json", mimeType: "application/json", buffer: txt(`{"sample":true,"value":123}
+`) }
+];
+var DEFAULT_SAMPLE = SAMPLES[0];
+function tokenMatches(sample, token) {
+  const t = token.trim().toLowerCase();
+  if (!t)
+    return false;
+  if (t.startsWith("."))
+    return t.slice(1) === sample.ext;
+  if (t.endsWith("/*"))
+    return sample.mimeType.startsWith(t.slice(0, -1));
+  return t === sample.mimeType;
+}
+function pickSample(accept) {
+  if (!accept?.trim())
+    return DEFAULT_SAMPLE;
+  const tokens = accept.split(",");
+  for (const sample of SAMPLES) {
+    if (tokens.some((tok) => tokenMatches(sample, tok)))
+      return sample;
+  }
+  return DEFAULT_SAMPLE;
+}
+
+// src/executor.ts
+var log2 = Log.create({ service: "hackbrowser:executor" });
+var CLICK_TIMEOUT = 2000;
+var FILL_TIMEOUT = 3000;
+var STABILIZE_TIMEOUT = 3000;
+var STABILIZE_WAIT = 200;
+async function execute(page, element, action, value, setPendingUI, _elementsBefore) {
+  const urlBefore = page.url();
+  log2.info("executing", { action, elementId: element.id, label: element.label, selector: element.selector });
+  let error40;
+  switch (action) {
+    case "fill":
+      error40 = await executeFill(page, element, value ?? "");
+      break;
+    case "click":
+      setPendingUI(snapshotPageUI(page, page.locator(element.selector).first()));
+      error40 = await executeClick(page, element);
+      break;
+    case "select":
+      error40 = await executeSelect(page, element, value ?? "");
+      break;
+    case "navigate":
+      error40 = await executeNavigate(page, element);
+      break;
+    default:
+      error40 = `Unknown action: ${action}`;
+  }
+  if (!error40) {
+    await stabilize(page);
+  }
+  const urlAfter = page.url();
+  const navigated = urlAfter !== urlBefore;
+  return {
+    success: !error40,
+    error: error40,
+    navigated,
+    newUrl: navigated ? urlAfter : undefined,
+    domChanged: undefined
+  };
+}
+async function executeFill(page, element, value) {
+  const selector = element.selector;
+  if (element.role === "slider" || element.type === "range") {
+    return executeSliderFill(page, selector || "role=slider", value);
+  }
+  if (element.type === "file") {
+    return executeFileSelect(page, selector);
+  }
+  const fillErr = await page.fill(selector, value, { timeout: FILL_TIMEOUT }).then(() => null).catch((e) => e.message.split(`
+`)[0]);
+  if (!fillErr)
+    return;
+  const typeErr = await page.locator(selector).pressSequentially(value, { delay: 30, timeout: FILL_TIMEOUT }).then(() => null).catch((e) => e.message.split(`
+`)[0]);
+  if (!typeErr)
+    return;
+  log2.warn("fill failed", { selector, error: fillErr });
+  return fillErr;
+}
+async function executeFileSelect(page, selector) {
+  const accept = await page.getAttribute(selector, "accept").catch(() => null);
+  const sample = pickSample(accept);
+  const err = await page.setInputFiles(selector, { name: sample.name, mimeType: sample.mimeType, buffer: sample.buffer }, { timeout: FILL_TIMEOUT }).then(() => null).catch((e) => e.message.split(`
+`)[0]);
+  if (err) {
+    log2.warn("file select failed", { selector, accept, error: err });
+    return err;
+  }
+  log2.info("file selected", { selector, file: sample.name });
+  return;
+}
+async function executeSliderFill(page, selector, value) {
+  const numericValue = parseInt(value, 10);
+  if (Number.isNaN(numericValue) || numericValue <= 0) {
+    return `Invalid slider value: ${value}`;
+  }
+  const root = page.locator(selector).first();
+  const evalSuccess = await root.evaluate((el, val) => {
+    const input = el.matches("input[type=range]") ? el : el.querySelector("input[type=range]");
+    if (!input)
+      return false;
+    input.value = String(val);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  }, numericValue).catch(() => false);
+  if (evalSuccess)
+    return;
+  const clickErr = await root.click({ timeout: CLICK_TIMEOUT }).then(() => null).catch((e) => e);
+  if (!clickErr) {
+    await page.keyboard.press("Home");
+    for (let i = 0;i < numericValue; i++) {
+      await page.keyboard.press("ArrowRight");
+    }
+    return;
+  }
+  return `Slider interaction failed: ${selector}`;
+}
+async function executeClick(page, element) {
+  const err = await page.click(element.selector, { timeout: CLICK_TIMEOUT }).then(() => null).catch((e) => e.message.split(`
+`)[0]);
+  if (err) {
+    log2.warn("click failed", { selector: element.selector, error: err });
+    return err;
+  }
+  return;
+}
+async function executeSelect(page, element, value) {
+  const nativeErr = await page.selectOption(element.selector, value, { timeout: FILL_TIMEOUT }).then(() => null).catch((e) => e.message.split(`
+`)[0]);
+  if (!nativeErr)
+    return;
+  const clickErr = await page.click(element.selector, { timeout: CLICK_TIMEOUT }).then(() => null).catch((e) => e.message.split(`
+`)[0]);
+  if (clickErr) {
+    log2.warn("select failed", { selector: element.selector, error: nativeErr });
+    return nativeErr;
+  }
+  await page.waitForTimeout(300);
+  const optionErr = await page.click(`role=option[name="${value}"]`, { timeout: CLICK_TIMEOUT }).then(() => null).catch(() => page.click(`text="${value}"`, { timeout: CLICK_TIMEOUT }).then(() => null).catch((e) => e.message.split(`
+`)[0]));
+  if (optionErr) {
+    log2.warn("select option failed", { value, error: optionErr });
+    return optionErr;
+  }
+  return;
+}
+async function executeNavigate(page, element) {
+  if (!element.href)
+    return "Navigate element has no href";
+  const err = await page.goto(element.href, { waitUntil: "domcontentloaded", timeout: 15000 }).then(() => null).catch((e) => e.message.split(`
+`)[0]);
+  if (err) {
+    log2.warn("navigate failed", { url: element.href, error: err });
+    return err;
+  }
+  await page.waitForTimeout(400);
+  await page.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => {});
+  return;
+}
+async function stabilize(page) {
+  await page.waitForLoadState("domcontentloaded", { timeout: STABILIZE_TIMEOUT }).catch(() => {});
+  await page.waitForTimeout(STABILIZE_WAIT);
+}
+
 // src/ingest.ts
-var log = Log.create({ service: "hackbrowser:ingest" });
+var log3 = Log.create({ service: "hackbrowser:ingest" });
 var authHeader = "";
 function initAuth(username, password) {
   if (!password) {
@@ -23158,18 +23689,18 @@ async function initSession(serverUrl, targetUrl, credentialId) {
       body: JSON.stringify(payload)
     });
     if (!res.ok) {
-      log.error("initSession failed", { status: res.status, body: await res.text().catch(() => "") });
+      log3.error("initSession failed", { status: res.status, body: await res.text().catch(() => "") });
       return null;
     }
     const data = await res.json();
     if (!data.sessionID) {
-      log.error("initSession: no sessionID in response");
+      log3.error("initSession: no sessionID in response");
       return null;
     }
-    log.info("session created", { sessionID: data.sessionID });
+    log3.info("session created", { sessionID: data.sessionID });
     return data.sessionID;
   } catch (err) {
-    log.error("initSession network error", { err: String(err) });
+    log3.error("initSession network error", { err: String(err) });
     return null;
   }
 }
@@ -23198,7 +23729,7 @@ function buildIngestPayload(captured, sessionID, credentialId, accessContext) {
 async function sendIngest(captured, serverUrl, sessionID, credentialId) {
   const payload = buildIngestPayload(captured, sessionID, credentialId);
   const body = JSON.stringify(payload);
-  log.debug("sending ingest", {
+  log3.debug("sending ingest", {
     request: captured.raw.split(`\r
 `)[0],
     uiFields: captured.uiContext?.fields.length ?? 0,
@@ -23215,14 +23746,14 @@ async function sendIngest(captured, serverUrl, sessionID, credentialId) {
       body
     });
     if (!res.ok) {
-      log.error("ingest server error", { status: res.status, body: await res.text().catch(() => "") });
+      log3.error("ingest server error", { status: res.status, body: await res.text().catch(() => "") });
       return null;
     }
     const data = await res.json();
-    log.debug("ingest accepted", { sessionID: data.sessionID ?? sessionID });
+    log3.debug("ingest accepted", { sessionID: data.sessionID ?? sessionID });
     return data;
   } catch (err) {
-    log.error("ingest network error", { err: String(err) });
+    log3.error("ingest network error", { err: String(err) });
     return null;
   }
 }
@@ -23280,14 +23811,14 @@ async function registerCredential(serverUrl, sessionID, label) {
       body: JSON.stringify({ label, headers: {} })
     });
     if (!res.ok) {
-      log.error("registerCredential failed", { status: res.status, label });
+      log3.error("registerCredential failed", { status: res.status, label });
       return null;
     }
     const data = await res.json();
-    log.info("credential registered", { sessionID, credentialID: data.id, label });
+    log3.info("credential registered", { sessionID, credentialID: data.id, label });
     return data.id ?? null;
   } catch (err) {
-    log.error("registerCredential network error", { err: String(err), label });
+    log3.error("registerCredential network error", { err: String(err), label });
     return null;
   }
 }
@@ -23299,340 +23830,4688 @@ async function syncCredentialHeaders(serverUrl, sessionID, credentialID, headers
       body: JSON.stringify({ headers })
     });
     if (!res.ok) {
-      log.error("syncCredentialHeaders failed", { status: res.status, credentialID });
+      log3.error("syncCredentialHeaders failed", { status: res.status, credentialID });
     } else {
-      log.debug("credential headers synced", { credentialID });
+      log3.debug("credential headers synced", { credentialID });
     }
   } catch (err) {
-    log.error("syncCredentialHeaders network error", { err: String(err), credentialID });
+    log3.error("syncCredentialHeaders network error", { err: String(err), credentialID });
   }
 }
 
-// src/auth.ts
-import fs from "fs";
-import readline from "readline";
-var log2 = Log.create({ service: "hackbrowser:auth" });
-async function loadSession(context, filePath) {
-  if (!fs.existsSync(filePath)) {
-    log2.info("no session file found", { file: filePath });
-    return false;
+// ../../node_modules/@ai-sdk/anthropic/dist/index.mjs
+var anthropicErrorDataSchema2 = exports_external.object({
+  type: exports_external.literal("error"),
+  error: exports_external.object({
+    type: exports_external.string(),
+    message: exports_external.string()
+  })
+});
+var anthropicFailedResponseHandler2 = createJsonErrorResponseHandler({
+  errorSchema: anthropicErrorDataSchema2,
+  errorToMessage: (data) => data.error.message
+});
+var anthropicFilePartProviderOptions2 = exports_external.object({
+  citations: exports_external.object({
+    enabled: exports_external.boolean()
+  }).optional(),
+  title: exports_external.string().optional(),
+  context: exports_external.string().optional()
+});
+var anthropicProviderOptions2 = exports_external.object({
+  sendReasoning: exports_external.boolean().optional(),
+  thinking: exports_external.object({
+    type: exports_external.union([exports_external.literal("enabled"), exports_external.literal("disabled")]),
+    budgetTokens: exports_external.number().optional()
+  }).optional(),
+  disableParallelToolUse: exports_external.boolean().optional()
+});
+function getCacheControl2(providerMetadata) {
+  var _a15;
+  const anthropic2 = providerMetadata == null ? undefined : providerMetadata.anthropic;
+  const cacheControlValue = (_a15 = anthropic2 == null ? undefined : anthropic2.cacheControl) != null ? _a15 : anthropic2 == null ? undefined : anthropic2.cache_control;
+  return cacheControlValue;
+}
+var webSearch_20250305ArgsSchema2 = exports_external.object({
+  maxUses: exports_external.number().optional(),
+  allowedDomains: exports_external.array(exports_external.string()).optional(),
+  blockedDomains: exports_external.array(exports_external.string()).optional(),
+  userLocation: exports_external.object({
+    type: exports_external.literal("approximate"),
+    city: exports_external.string().optional(),
+    region: exports_external.string().optional(),
+    country: exports_external.string().optional(),
+    timezone: exports_external.string().optional()
+  }).optional()
+});
+var webSearch_20250305OutputSchema2 = exports_external.array(exports_external.object({
+  url: exports_external.string(),
+  title: exports_external.string(),
+  pageAge: exports_external.string().nullable(),
+  encryptedContent: exports_external.string(),
+  type: exports_external.string()
+}));
+var factory2 = createProviderDefinedToolFactoryWithOutputSchema({
+  id: "anthropic.web_search_20250305",
+  name: "web_search",
+  inputSchema: exports_external.object({
+    query: exports_external.string()
+  }),
+  outputSchema: webSearch_20250305OutputSchema2
+});
+var webSearch_202503052 = (args = {}) => {
+  return factory2(args);
+};
+function isWebSearchTool2(tool2) {
+  return typeof tool2 === "object" && tool2 !== null && "type" in tool2 && tool2.type === "web_search_20250305";
+}
+function prepareTools3({
+  tools,
+  toolChoice,
+  disableParallelToolUse
+}) {
+  tools = (tools == null ? undefined : tools.length) ? tools : undefined;
+  const toolWarnings = [];
+  const betas = /* @__PURE__ */ new Set;
+  if (tools == null) {
+    return { tools: undefined, toolChoice: undefined, toolWarnings, betas };
   }
-  try {
-    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    if (data.cookies) {
-      await context.addCookies(data.cookies);
+  const anthropicTools2 = [];
+  for (const tool2 of tools) {
+    if (isWebSearchTool2(tool2)) {
+      anthropicTools2.push(tool2);
+      continue;
     }
-    log2.info("session loaded", { file: filePath });
-    return true;
-  } catch (err) {
-    log2.error("failed to load session", { file: filePath, err: String(err) });
-    return false;
-  }
-}
-async function waitForHuman(prompt) {
-  return new Promise((resolve2) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(`
-[human] ${prompt} `, (answer) => {
-      rl.close();
-      resolve2(answer.trim());
-    });
-  });
-}
-async function handle2FA(page) {
-  const mfaSelectors = [
-    'input[name*="otp"]',
-    'input[name*="mfa"]',
-    'input[name*="totp"]',
-    'input[name*="2fa"]',
-    'input[name*="verification"]',
-    'input[placeholder*="verification code" i]',
-    'input[placeholder*="auth code" i]',
-    'input[placeholder*="one-time" i]',
-    'input[placeholder*="otp" i]',
-    'input[autocomplete="one-time-code"]'
-  ];
-  for (const sel of mfaSelectors) {
-    const el = await page.$(sel);
-    if (el) {
-      log2.info("2FA detected", { selector: sel });
-      const code = await waitForHuman("Enter your 2FA code and press Enter:");
-      await el.fill(code);
-      const form = await page.$("form");
-      if (form) {
-        const submitBtn = await form.$('button[type="submit"], input[type="submit"], button:not([type])');
-        if (submitBtn)
-          await submitBtn.click();
-      }
-      await page.waitForLoadState("domcontentloaded").catch(() => {});
-      return true;
-    }
-  }
-  return false;
-}
-var savedBtnPos = null;
-async function waitForManualLogin(page, label, progress) {
-  let resolveReady;
-  const readyPromise = new Promise((resolve2) => {
-    resolveReady = resolve2;
-  });
-  const callbackName = label ? `__cyberstrikeReady_${label}` : "__cyberstrikeReady";
-  await page.exposeFunction(callbackName, () => {
-    resolveReady();
-  });
-  const posCallbackName = label ? `__cyberstrikePos_${label}` : "__cyberstrikePos";
-  await page.exposeFunction(posCallbackName, (left, top) => {
-    savedBtnPos = { left, top };
-  });
-  const isFinal = !progress || progress.index >= progress.total - 1;
-  const step = progress ? ` (${progress.index + 1}/${progress.total})` : "";
-  const who = label ? label.toUpperCase() : "LOGIN";
-  const topLine = isFinal ? `// ${who}${step} · LOGIN MANUALLY ⟶ START SCAN` : `// ${who}${step} · LOGIN MANUALLY ⟶ CONFIRM & NEXT`;
-  const buttonText = isFinal ? "START SCAN" : "CONFIRM & NEXT ⟶";
-  const buttonId = label ? `__cyberstrike-ready-btn-${label}` : "__cyberstrike-ready-btn";
-  const styleId = "__cyberstrike-ready-btn-style";
-  const injectButton = async () => {
-    await page.evaluate(({ btnId, btnText, topText, cbName, styleElId, posCb, savedPos, isFinal: isFinal2 }) => {
-      if (document.getElementById(btnId))
-        return;
-      if (!document.getElementById(styleElId)) {
-        const style = document.createElement("style");
-        style.id = styleElId;
-        style.textContent = `
-          @keyframes __cs-btn-pulse { 0%, 100% { opacity: 0.55; transform: scale(1); } 50% { opacity: 1; transform: scale(1.15); } }
-          #${btnId}:hover { box-shadow: 0 0 0 1px rgba(34,211,238,0.35), 0 0 28px rgba(34,211,238,0.45), 0 8px 24px rgba(0,0,0,0.6) !important; background: #0e141c !important; }
-          #${btnId}:active { transform: translateY(1px); }
-          #${btnId} .__cs-br { position: absolute; width: 8px; height: 8px; pointer-events: none; }
-          #${btnId} .__cs-br::before, #${btnId} .__cs-br::after { content: ""; position: absolute; background: #22d3ee; }
-          #${btnId} .__cs-br.tl::before { top: 0; left: 0; width: 8px; height: 1px; }
-          #${btnId} .__cs-br.tl::after  { top: 0; left: 0; width: 1px; height: 8px; }
-          #${btnId} .__cs-br.tr::before { top: 0; right: 0; width: 8px; height: 1px; }
-          #${btnId} .__cs-br.tr::after  { top: 0; right: 0; width: 1px; height: 8px; }
-          #${btnId} .__cs-br.bl::before { bottom: 0; left: 0; width: 8px; height: 1px; }
-          #${btnId} .__cs-br.bl::after  { bottom: 0; left: 0; width: 1px; height: 8px; }
-          #${btnId} .__cs-br.br::before { bottom: 0; right: 0; width: 8px; height: 1px; }
-          #${btnId} .__cs-br.br::after  { bottom: 0; right: 0; width: 1px; height: 8px; }
-          #${btnId} .__cs-br.tl { top: -1px; left: -1px; }
-          #${btnId} .__cs-br.tr { top: -1px; right: -1px; }
-          #${btnId} .__cs-br.bl { bottom: -1px; left: -1px; }
-          #${btnId} .__cs-br.br { bottom: -1px; right: -1px; }
-        `;
-        document.head.appendChild(style);
-      }
-      const btn = document.createElement("div");
-      btn.id = btnId;
-      btn.style.cssText = [
-        "all: initial",
-        "position: fixed",
-        "top: 16px",
-        "right: 16px",
-        "z-index: 2147483647",
-        "display: flex",
-        "flex-direction: column",
-        "align-items: flex-start",
-        "gap: 4px",
-        "padding: 10px 16px 10px 14px",
-        "background: #0b0f14",
-        "border: 1px solid #1f2937",
-        "color: #e5e7eb",
-        "font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, Consolas, ui-monospace, monospace",
-        "cursor: grab",
-        "user-select: none",
-        "touch-action: none",
-        "box-shadow: 0 0 0 1px rgba(34,211,238,0.15), 0 0 20px rgba(34,211,238,0.25), 0 8px 24px rgba(0,0,0,0.5)",
-        "transition: box-shadow 180ms ease-out, background 180ms ease-out",
-        "-webkit-font-smoothing: antialiased"
-      ].join(";");
-      if (savedPos) {
-        btn.style.left = savedPos.left + "px";
-        btn.style.top = savedPos.top + "px";
-        btn.style.right = "auto";
-      }
-      for (const corner of ["tl", "tr", "bl", "br"]) {
-        const b = document.createElement("span");
-        b.className = `__cs-br ${corner}`;
-        btn.appendChild(b);
-      }
-      const topRow = document.createElement("span");
-      topRow.style.cssText = "display: flex; align-items: center; gap: 8px;";
-      const grip = document.createElement("span");
-      grip.textContent = "⠿";
-      grip.setAttribute("aria-hidden", "true");
-      grip.style.cssText = "font-size: 12px; color: #22d3ee; opacity: 0.55; cursor: grab;";
-      const meta = document.createElement("span");
-      meta.textContent = topText;
-      meta.style.cssText = [
-        "font-size: 9px",
-        "letter-spacing: 0.12em",
-        "color: #22d3ee",
-        "opacity: 0.75",
-        "text-transform: uppercase"
-      ].join(";");
-      topRow.appendChild(grip);
-      topRow.appendChild(meta);
-      btn.appendChild(topRow);
-      const action = document.createElement("button");
-      action.type = "button";
-      action.setAttribute("aria-label", isFinal2 ? "Start scan" : "Confirm login and open next");
-      action.style.cssText = [
-        "all: unset",
-        "display: flex",
-        "align-items: center",
-        "gap: 8px",
-        "cursor: pointer",
-        "padding: 2px 0"
-      ].join(";");
-      const dot = document.createElement("span");
-      dot.style.cssText = [
-        "display: inline-block",
-        "width: 7px",
-        "height: 7px",
-        "border-radius: 50%",
-        "background: #22d3ee",
-        "box-shadow: 0 0 0 1px rgba(34,211,238,0.35), 0 0 8px rgba(34,211,238,0.8)",
-        "animation: __cs-btn-pulse 1.4s ease-in-out infinite"
-      ].join(";");
-      const txt = document.createElement("span");
-      txt.textContent = btnText;
-      txt.style.cssText = [
-        "font-size: 12px",
-        "font-weight: 600",
-        "letter-spacing: 0.14em",
-        "color: #22d3ee",
-        "text-transform: uppercase"
-      ].join(";");
-      action.appendChild(dot);
-      action.appendChild(txt);
-      btn.appendChild(action);
-      const hint = document.createElement("span");
-      hint.textContent = "drag ⠿ to move";
-      hint.style.cssText = ["font-size: 8px", "letter-spacing: 0.1em", "color: #6b7280", "margin-top: 1px"].join(";");
-      btn.appendChild(hint);
-      let dragging = false;
-      let moved = false;
-      let sx = 0;
-      let sy = 0;
-      let ox = 0;
-      let oy = 0;
-      let dragEndedAt = 0;
-      btn.addEventListener("pointerdown", (e) => {
-        if (action.contains(e.target))
-          return;
-        dragging = true;
-        moved = false;
-        const r = btn.getBoundingClientRect();
-        ox = r.left;
-        oy = r.top;
-        sx = e.clientX;
-        sy = e.clientY;
-        btn.style.left = ox + "px";
-        btn.style.top = oy + "px";
-        btn.style.right = "auto";
-        btn.style.cursor = "grabbing";
-        btn.setPointerCapture(e.pointerId);
-        e.preventDefault();
-      });
-      btn.addEventListener("pointermove", (e) => {
-        if (!dragging)
-          return;
-        const dx = e.clientX - sx;
-        const dy = e.clientY - sy;
-        if (Math.abs(dx) + Math.abs(dy) > 4)
-          moved = true;
-        const w = btn.offsetWidth;
-        const h = btn.offsetHeight;
-        btn.style.left = Math.max(0, Math.min(window.innerWidth - w, ox + dx)) + "px";
-        btn.style.top = Math.max(0, Math.min(window.innerHeight - h, oy + dy)) + "px";
-      });
-      const endDrag = (e) => {
-        if (!dragging)
-          return;
-        dragging = false;
-        btn.style.cursor = "grab";
-        try {
-          btn.releasePointerCapture(e.pointerId);
-        } catch {}
-        if (moved) {
-          dragEndedAt = Date.now();
-          const r = btn.getBoundingClientRect();
-          window[posCb](r.left, r.top);
+    switch (tool2.type) {
+      case "function":
+        const cacheControl = getCacheControl2(tool2.providerOptions);
+        anthropicTools2.push({
+          name: tool2.name,
+          description: tool2.description,
+          input_schema: tool2.inputSchema,
+          cache_control: cacheControl
+        });
+        break;
+      case "provider-defined":
+        switch (tool2.id) {
+          case "anthropic.computer_20250124":
+            betas.add("computer-use-2025-01-24");
+            anthropicTools2.push({
+              name: "computer",
+              type: "computer_20250124",
+              display_width_px: tool2.args.displayWidthPx,
+              display_height_px: tool2.args.displayHeightPx,
+              display_number: tool2.args.displayNumber
+            });
+            break;
+          case "anthropic.computer_20241022":
+            betas.add("computer-use-2024-10-22");
+            anthropicTools2.push({
+              name: "computer",
+              type: "computer_20241022",
+              display_width_px: tool2.args.displayWidthPx,
+              display_height_px: tool2.args.displayHeightPx,
+              display_number: tool2.args.displayNumber
+            });
+            break;
+          case "anthropic.text_editor_20250124":
+            betas.add("computer-use-2025-01-24");
+            anthropicTools2.push({
+              name: "str_replace_editor",
+              type: "text_editor_20250124"
+            });
+            break;
+          case "anthropic.text_editor_20241022":
+            betas.add("computer-use-2024-10-22");
+            anthropicTools2.push({
+              name: "str_replace_editor",
+              type: "text_editor_20241022"
+            });
+            break;
+          case "anthropic.text_editor_20250429":
+            betas.add("computer-use-2025-01-24");
+            anthropicTools2.push({
+              name: "str_replace_based_edit_tool",
+              type: "text_editor_20250429"
+            });
+            break;
+          case "anthropic.bash_20250124":
+            betas.add("computer-use-2025-01-24");
+            anthropicTools2.push({
+              name: "bash",
+              type: "bash_20250124"
+            });
+            break;
+          case "anthropic.bash_20241022":
+            betas.add("computer-use-2024-10-22");
+            anthropicTools2.push({
+              name: "bash",
+              type: "bash_20241022"
+            });
+            break;
+          case "anthropic.web_search_20250305": {
+            const args = webSearch_20250305ArgsSchema2.parse(tool2.args);
+            anthropicTools2.push({
+              type: "web_search_20250305",
+              name: "web_search",
+              max_uses: args.maxUses,
+              allowed_domains: args.allowedDomains,
+              blocked_domains: args.blockedDomains,
+              user_location: args.userLocation
+            });
+            break;
+          }
+          default:
+            toolWarnings.push({ type: "unsupported-tool", tool: tool2 });
+            break;
         }
+        break;
+      default:
+        toolWarnings.push({ type: "unsupported-tool", tool: tool2 });
+        break;
+    }
+  }
+  if (toolChoice == null) {
+    return {
+      tools: anthropicTools2,
+      toolChoice: disableParallelToolUse ? { type: "auto", disable_parallel_tool_use: disableParallelToolUse } : undefined,
+      toolWarnings,
+      betas
+    };
+  }
+  const type = toolChoice.type;
+  switch (type) {
+    case "auto":
+      return {
+        tools: anthropicTools2,
+        toolChoice: {
+          type: "auto",
+          disable_parallel_tool_use: disableParallelToolUse
+        },
+        toolWarnings,
+        betas
       };
-      btn.addEventListener("pointerup", endDrag);
-      btn.addEventListener("pointercancel", endDrag);
-      action.addEventListener("click", () => {
-        if (Date.now() - dragEndedAt < 350)
-          return;
-        window[cbName]();
-        meta.textContent = isFinal2 ? "// SCANNING…" : "// LOGIN CONFIRMED";
-        txt.textContent = isFinal2 ? "INITIATED" : "NEXT LOGIN ⟶";
-        dot.style.animation = "none";
-        dot.style.background = "#6b7280";
-        dot.style.boxShadow = "none";
-        txt.style.color = "#9ca3af";
-        meta.style.color = "#6b7280";
-        action.style.cursor = "default";
-        btn.style.cursor = "default";
-        btn.style.opacity = "0.7";
-        hint.style.display = "none";
+    case "required":
+      return {
+        tools: anthropicTools2,
+        toolChoice: {
+          type: "any",
+          disable_parallel_tool_use: disableParallelToolUse
+        },
+        toolWarnings,
+        betas
+      };
+    case "none":
+      return { tools: undefined, toolChoice: undefined, toolWarnings, betas };
+    case "tool":
+      return {
+        tools: anthropicTools2,
+        toolChoice: {
+          type: "tool",
+          name: toolChoice.toolName,
+          disable_parallel_tool_use: disableParallelToolUse
+        },
+        toolWarnings,
+        betas
+      };
+    default: {
+      const _exhaustiveCheck = type;
+      throw new UnsupportedFunctionalityError({
+        functionality: `tool choice type: ${_exhaustiveCheck}`
       });
-      document.body.appendChild(btn);
-      {
-        const w = btn.offsetWidth;
-        const h = btn.offsetHeight;
-        const curLeft = parseFloat(btn.style.left || "");
-        const curTop = parseFloat(btn.style.top || "");
-        if (!Number.isNaN(curLeft))
-          btn.style.left = Math.max(0, Math.min(window.innerWidth - w, curLeft)) + "px";
-        if (!Number.isNaN(curTop))
-          btn.style.top = Math.max(0, Math.min(window.innerHeight - h, curTop)) + "px";
-      }
-    }, {
-      btnId: buttonId,
-      btnText: buttonText,
-      topText: topLine,
-      cbName: callbackName,
-      styleElId: styleId,
-      posCb: posCallbackName,
-      savedPos: savedBtnPos,
-      isFinal
-    }).catch(() => {});
-  };
-  await injectButton();
-  page.on("load", injectButton);
-  log2.info("waiting for manual login", { label: label ?? "default" });
-  await readyPromise;
-  page.removeListener("load", injectButton);
-  await page.evaluate((btnId) => {
-    document.getElementById(btnId)?.remove();
-  }, buttonId).catch(() => {});
-  log2.info("manual login confirmed", { label: label ?? "default" });
-}
-async function autoLogin(page, credentials, opts) {
-  const userSel = credentials.usernameSelector ?? 'input[type="text"], input[type="email"], input[name*="user"], input[name*="email"], input[id*="user"], input[id*="email"]';
-  const passSel = credentials.passwordSelector ?? 'input[type="password"]';
-  try {
-    await page.waitForSelector(userSel, { timeout: 5000 });
-    await page.fill(userSel, credentials.username);
-    await page.fill(passSel, credentials.password);
-    const submitBtn = await page.$('button[type="submit"], input[type="submit"], button:not([type])');
-    if (submitBtn) {
-      await submitBtn.click();
-    } else {
-      await page.keyboard.press("Enter");
     }
-    await page.waitForLoadState("domcontentloaded").catch(() => {});
-    log2.info("auto-login attempted", { username: credentials.username });
-    await handle2FA(page);
-  } catch (err) {
-    if (opts?.headless) {
-      log2.warn("auto-login failed on the seed page; continuing anonymous (headless)", { err: String(err) });
-      return;
-    }
-    log2.warn("auto-login failed, falling back to manual login", { err: String(err) });
-    await waitForManualLogin(page);
   }
 }
+function convertToString2(data) {
+  if (typeof data === "string") {
+    return Buffer.from(data, "base64").toString("utf-8");
+  }
+  if (data instanceof Uint8Array) {
+    return new TextDecoder().decode(data);
+  }
+  if (data instanceof URL) {
+    throw new UnsupportedFunctionalityError({
+      functionality: "URL-based text documents are not supported for citations"
+    });
+  }
+  throw new UnsupportedFunctionalityError({
+    functionality: `unsupported data type for text documents: ${typeof data}`
+  });
+}
+async function convertToAnthropicMessagesPrompt2({
+  prompt,
+  sendReasoning,
+  warnings
+}) {
+  var _a15, _b, _c, _d, _e;
+  const betas = /* @__PURE__ */ new Set;
+  const blocks = groupIntoBlocks2(prompt);
+  let system = undefined;
+  const messages = [];
+  async function shouldEnableCitations(providerMetadata) {
+    var _a22, _b2;
+    const anthropicOptions = await parseProviderOptions({
+      provider: "anthropic",
+      providerOptions: providerMetadata,
+      schema: anthropicFilePartProviderOptions2
+    });
+    return (_b2 = (_a22 = anthropicOptions == null ? undefined : anthropicOptions.citations) == null ? undefined : _a22.enabled) != null ? _b2 : false;
+  }
+  async function getDocumentMetadata(providerMetadata) {
+    const anthropicOptions = await parseProviderOptions({
+      provider: "anthropic",
+      providerOptions: providerMetadata,
+      schema: anthropicFilePartProviderOptions2
+    });
+    return {
+      title: anthropicOptions == null ? undefined : anthropicOptions.title,
+      context: anthropicOptions == null ? undefined : anthropicOptions.context
+    };
+  }
+  for (let i = 0;i < blocks.length; i++) {
+    const block = blocks[i];
+    const isLastBlock = i === blocks.length - 1;
+    const type = block.type;
+    switch (type) {
+      case "system": {
+        if (system != null) {
+          throw new UnsupportedFunctionalityError({
+            functionality: "Multiple system messages that are separated by user/assistant messages"
+          });
+        }
+        system = block.messages.map(({ content, providerOptions }) => ({
+          type: "text",
+          text: content,
+          cache_control: getCacheControl2(providerOptions)
+        }));
+        break;
+      }
+      case "user": {
+        const anthropicContent = [];
+        for (const message of block.messages) {
+          const { role, content } = message;
+          switch (role) {
+            case "user": {
+              for (let j = 0;j < content.length; j++) {
+                const part = content[j];
+                const isLastPart = j === content.length - 1;
+                const cacheControl = (_a15 = getCacheControl2(part.providerOptions)) != null ? _a15 : isLastPart ? getCacheControl2(message.providerOptions) : undefined;
+                switch (part.type) {
+                  case "text": {
+                    anthropicContent.push({
+                      type: "text",
+                      text: part.text,
+                      cache_control: cacheControl
+                    });
+                    break;
+                  }
+                  case "file": {
+                    if (part.mediaType.startsWith("image/")) {
+                      anthropicContent.push({
+                        type: "image",
+                        source: part.data instanceof URL ? {
+                          type: "url",
+                          url: part.data.toString()
+                        } : {
+                          type: "base64",
+                          media_type: part.mediaType === "image/*" ? "image/jpeg" : part.mediaType,
+                          data: convertToBase64(part.data)
+                        },
+                        cache_control: cacheControl
+                      });
+                    } else if (part.mediaType === "application/pdf") {
+                      betas.add("pdfs-2024-09-25");
+                      const enableCitations = await shouldEnableCitations(part.providerOptions);
+                      const metadata = await getDocumentMetadata(part.providerOptions);
+                      anthropicContent.push({
+                        type: "document",
+                        source: part.data instanceof URL ? {
+                          type: "url",
+                          url: part.data.toString()
+                        } : {
+                          type: "base64",
+                          media_type: "application/pdf",
+                          data: convertToBase64(part.data)
+                        },
+                        title: (_b = metadata.title) != null ? _b : part.filename,
+                        ...metadata.context && { context: metadata.context },
+                        ...enableCitations && {
+                          citations: { enabled: true }
+                        },
+                        cache_control: cacheControl
+                      });
+                    } else if (part.mediaType === "text/plain") {
+                      const enableCitations = await shouldEnableCitations(part.providerOptions);
+                      const metadata = await getDocumentMetadata(part.providerOptions);
+                      anthropicContent.push({
+                        type: "document",
+                        source: part.data instanceof URL ? {
+                          type: "url",
+                          url: part.data.toString()
+                        } : {
+                          type: "text",
+                          media_type: "text/plain",
+                          data: convertToString2(part.data)
+                        },
+                        title: (_c = metadata.title) != null ? _c : part.filename,
+                        ...metadata.context && { context: metadata.context },
+                        ...enableCitations && {
+                          citations: { enabled: true }
+                        },
+                        cache_control: cacheControl
+                      });
+                    } else {
+                      throw new UnsupportedFunctionalityError({
+                        functionality: `media type: ${part.mediaType}`
+                      });
+                    }
+                    break;
+                  }
+                }
+              }
+              break;
+            }
+            case "tool": {
+              for (let i2 = 0;i2 < content.length; i2++) {
+                const part = content[i2];
+                const isLastPart = i2 === content.length - 1;
+                const cacheControl = (_d = getCacheControl2(part.providerOptions)) != null ? _d : isLastPart ? getCacheControl2(message.providerOptions) : undefined;
+                const output = part.output;
+                let contentValue;
+                switch (output.type) {
+                  case "content":
+                    contentValue = output.value.map((contentPart) => {
+                      switch (contentPart.type) {
+                        case "text":
+                          return {
+                            type: "text",
+                            text: contentPart.text,
+                            cache_control: undefined
+                          };
+                        case "media": {
+                          if (contentPart.mediaType.startsWith("image/")) {
+                            return {
+                              type: "image",
+                              source: {
+                                type: "base64",
+                                media_type: contentPart.mediaType,
+                                data: contentPart.data
+                              },
+                              cache_control: undefined
+                            };
+                          }
+                          throw new UnsupportedFunctionalityError({
+                            functionality: `media type: ${contentPart.mediaType}`
+                          });
+                        }
+                      }
+                    });
+                    break;
+                  case "text":
+                  case "error-text":
+                    contentValue = output.value;
+                    break;
+                  case "json":
+                  case "error-json":
+                  default:
+                    contentValue = JSON.stringify(output.value);
+                    break;
+                }
+                anthropicContent.push({
+                  type: "tool_result",
+                  tool_use_id: part.toolCallId,
+                  content: contentValue,
+                  is_error: output.type === "error-text" || output.type === "error-json" ? true : undefined,
+                  cache_control: cacheControl
+                });
+              }
+              break;
+            }
+            default: {
+              const _exhaustiveCheck = role;
+              throw new Error(`Unsupported role: ${_exhaustiveCheck}`);
+            }
+          }
+        }
+        messages.push({ role: "user", content: anthropicContent });
+        break;
+      }
+      case "assistant": {
+        const anthropicContent = [];
+        for (let j = 0;j < block.messages.length; j++) {
+          const message = block.messages[j];
+          const isLastMessage = j === block.messages.length - 1;
+          const { content } = message;
+          for (let k = 0;k < content.length; k++) {
+            const part = content[k];
+            const isLastContentPart = k === content.length - 1;
+            const cacheControl = (_e = getCacheControl2(part.providerOptions)) != null ? _e : isLastContentPart ? getCacheControl2(message.providerOptions) : undefined;
+            switch (part.type) {
+              case "text": {
+                anthropicContent.push({
+                  type: "text",
+                  text: isLastBlock && isLastMessage && isLastContentPart ? part.text.trim() : part.text,
+                  cache_control: cacheControl
+                });
+                break;
+              }
+              case "reasoning": {
+                if (sendReasoning) {
+                  const reasoningMetadata = await parseProviderOptions({
+                    provider: "anthropic",
+                    providerOptions: part.providerOptions,
+                    schema: anthropicReasoningMetadataSchema2
+                  });
+                  if (reasoningMetadata != null) {
+                    if (reasoningMetadata.signature != null) {
+                      anthropicContent.push({
+                        type: "thinking",
+                        thinking: part.text,
+                        signature: reasoningMetadata.signature,
+                        cache_control: cacheControl
+                      });
+                    } else if (reasoningMetadata.redactedData != null) {
+                      anthropicContent.push({
+                        type: "redacted_thinking",
+                        data: reasoningMetadata.redactedData,
+                        cache_control: cacheControl
+                      });
+                    } else {
+                      warnings.push({
+                        type: "other",
+                        message: "unsupported reasoning metadata"
+                      });
+                    }
+                  } else {
+                    warnings.push({
+                      type: "other",
+                      message: "unsupported reasoning metadata"
+                    });
+                  }
+                } else {
+                  warnings.push({
+                    type: "other",
+                    message: "sending reasoning content is disabled for this model"
+                  });
+                }
+                break;
+              }
+              case "tool-call": {
+                if (part.providerExecuted) {
+                  if (part.toolName === "web_search") {
+                    anthropicContent.push({
+                      type: "server_tool_use",
+                      id: part.toolCallId,
+                      name: "web_search",
+                      input: part.input,
+                      cache_control: cacheControl
+                    });
+                    break;
+                  }
+                  warnings.push({
+                    type: "other",
+                    message: `provider executed tool call for tool ${part.toolName} is not supported`
+                  });
+                  break;
+                }
+                anthropicContent.push({
+                  type: "tool_use",
+                  id: part.toolCallId,
+                  name: part.toolName,
+                  input: part.input,
+                  cache_control: cacheControl
+                });
+                break;
+              }
+              case "tool-result": {
+                if (part.toolName === "web_search") {
+                  const output = part.output;
+                  if (output.type !== "json") {
+                    warnings.push({
+                      type: "other",
+                      message: `provider executed tool result output type ${output.type} for tool ${part.toolName} is not supported`
+                    });
+                    break;
+                  }
+                  const webSearchOutput = webSearch_20250305OutputSchema2.parse(output.value);
+                  anthropicContent.push({
+                    type: "web_search_tool_result",
+                    tool_use_id: part.toolCallId,
+                    content: webSearchOutput.map((result) => ({
+                      url: result.url,
+                      title: result.title,
+                      page_age: result.pageAge,
+                      encrypted_content: result.encryptedContent,
+                      type: result.type
+                    })),
+                    cache_control: cacheControl
+                  });
+                  break;
+                }
+                warnings.push({
+                  type: "other",
+                  message: `provider executed tool result for tool ${part.toolName} is not supported`
+                });
+                break;
+              }
+            }
+          }
+        }
+        messages.push({ role: "assistant", content: anthropicContent });
+        break;
+      }
+      default: {
+        const _exhaustiveCheck = type;
+        throw new Error(`content type: ${_exhaustiveCheck}`);
+      }
+    }
+  }
+  return {
+    prompt: { system, messages },
+    betas
+  };
+}
+function groupIntoBlocks2(prompt) {
+  const blocks = [];
+  let currentBlock = undefined;
+  for (const message of prompt) {
+    const { role } = message;
+    switch (role) {
+      case "system": {
+        if ((currentBlock == null ? undefined : currentBlock.type) !== "system") {
+          currentBlock = { type: "system", messages: [] };
+          blocks.push(currentBlock);
+        }
+        currentBlock.messages.push(message);
+        break;
+      }
+      case "assistant": {
+        if ((currentBlock == null ? undefined : currentBlock.type) !== "assistant") {
+          currentBlock = { type: "assistant", messages: [] };
+          blocks.push(currentBlock);
+        }
+        currentBlock.messages.push(message);
+        break;
+      }
+      case "user": {
+        if ((currentBlock == null ? undefined : currentBlock.type) !== "user") {
+          currentBlock = { type: "user", messages: [] };
+          blocks.push(currentBlock);
+        }
+        currentBlock.messages.push(message);
+        break;
+      }
+      case "tool": {
+        if ((currentBlock == null ? undefined : currentBlock.type) !== "user") {
+          currentBlock = { type: "user", messages: [] };
+          blocks.push(currentBlock);
+        }
+        currentBlock.messages.push(message);
+        break;
+      }
+      default: {
+        const _exhaustiveCheck = role;
+        throw new Error(`Unsupported role: ${_exhaustiveCheck}`);
+      }
+    }
+  }
+  return blocks;
+}
+function mapAnthropicStopReason2({
+  finishReason,
+  isJsonResponseFromTool
+}) {
+  switch (finishReason) {
+    case "end_turn":
+    case "stop_sequence":
+      return "stop";
+    case "tool_use":
+      return isJsonResponseFromTool ? "stop" : "tool-calls";
+    case "max_tokens":
+      return "length";
+    default:
+      return "unknown";
+  }
+}
+var citationSchemas2 = {
+  webSearchResult: exports_external.object({
+    type: exports_external.literal("web_search_result_location"),
+    cited_text: exports_external.string(),
+    url: exports_external.string(),
+    title: exports_external.string(),
+    encrypted_index: exports_external.string()
+  }),
+  pageLocation: exports_external.object({
+    type: exports_external.literal("page_location"),
+    cited_text: exports_external.string(),
+    document_index: exports_external.number(),
+    document_title: exports_external.string().nullable(),
+    start_page_number: exports_external.number(),
+    end_page_number: exports_external.number()
+  }),
+  charLocation: exports_external.object({
+    type: exports_external.literal("char_location"),
+    cited_text: exports_external.string(),
+    document_index: exports_external.number(),
+    document_title: exports_external.string().nullable(),
+    start_char_index: exports_external.number(),
+    end_char_index: exports_external.number()
+  })
+};
+var citationSchema2 = exports_external.discriminatedUnion("type", [
+  citationSchemas2.webSearchResult,
+  citationSchemas2.pageLocation,
+  citationSchemas2.charLocation
+]);
+var documentCitationSchema2 = exports_external.discriminatedUnion("type", [
+  citationSchemas2.pageLocation,
+  citationSchemas2.charLocation
+]);
+function processCitation2(citation, citationDocuments, generateId3, onSource) {
+  if (citation.type === "page_location" || citation.type === "char_location") {
+    const source = createCitationSource2(citation, citationDocuments, generateId3);
+    if (source) {
+      onSource(source);
+    }
+  }
+}
+function createCitationSource2(citation, citationDocuments, generateId3) {
+  var _a15;
+  const documentInfo = citationDocuments[citation.document_index];
+  if (!documentInfo) {
+    return null;
+  }
+  const providerMetadata = citation.type === "page_location" ? {
+    citedText: citation.cited_text,
+    startPageNumber: citation.start_page_number,
+    endPageNumber: citation.end_page_number
+  } : {
+    citedText: citation.cited_text,
+    startCharIndex: citation.start_char_index,
+    endCharIndex: citation.end_char_index
+  };
+  return {
+    type: "source",
+    sourceType: "document",
+    id: generateId3(),
+    mediaType: documentInfo.mediaType,
+    title: (_a15 = citation.document_title) != null ? _a15 : documentInfo.title,
+    filename: documentInfo.filename,
+    providerMetadata: {
+      anthropic: providerMetadata
+    }
+  };
+}
+var AnthropicMessagesLanguageModel2 = class {
+  constructor(modelId, config2) {
+    this.specificationVersion = "v2";
+    var _a15;
+    this.modelId = modelId;
+    this.config = config2;
+    this.generateId = (_a15 = config2.generateId) != null ? _a15 : generateId;
+  }
+  supportsUrl(url2) {
+    return url2.protocol === "https:";
+  }
+  get provider() {
+    return this.config.provider;
+  }
+  get supportedUrls() {
+    var _a15, _b, _c;
+    return (_c = (_b = (_a15 = this.config).supportedUrls) == null ? undefined : _b.call(_a15)) != null ? _c : {};
+  }
+  async getArgs({
+    prompt,
+    maxOutputTokens = 4096,
+    temperature,
+    topP,
+    topK,
+    frequencyPenalty,
+    presencePenalty,
+    stopSequences,
+    responseFormat,
+    seed,
+    tools,
+    toolChoice,
+    providerOptions
+  }) {
+    var _a15, _b, _c;
+    const warnings = [];
+    if (frequencyPenalty != null) {
+      warnings.push({
+        type: "unsupported-setting",
+        setting: "frequencyPenalty"
+      });
+    }
+    if (presencePenalty != null) {
+      warnings.push({
+        type: "unsupported-setting",
+        setting: "presencePenalty"
+      });
+    }
+    if (seed != null) {
+      warnings.push({
+        type: "unsupported-setting",
+        setting: "seed"
+      });
+    }
+    if ((responseFormat == null ? undefined : responseFormat.type) === "json") {
+      if (responseFormat.schema == null) {
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "responseFormat",
+          details: "JSON response format requires a schema. The response format is ignored."
+        });
+      } else if (tools != null) {
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "tools",
+          details: "JSON response format does not support tools. The provided tools are ignored."
+        });
+      }
+    }
+    const jsonResponseTool = (responseFormat == null ? undefined : responseFormat.type) === "json" && responseFormat.schema != null ? {
+      type: "function",
+      name: "json",
+      description: "Respond with a JSON object.",
+      inputSchema: responseFormat.schema
+    } : undefined;
+    const anthropicOptions = await parseProviderOptions({
+      provider: "anthropic",
+      providerOptions,
+      schema: anthropicProviderOptions2
+    });
+    const { prompt: messagesPrompt, betas: messagesBetas } = await convertToAnthropicMessagesPrompt2({
+      prompt,
+      sendReasoning: (_a15 = anthropicOptions == null ? undefined : anthropicOptions.sendReasoning) != null ? _a15 : true,
+      warnings
+    });
+    const isThinking = ((_b = anthropicOptions == null ? undefined : anthropicOptions.thinking) == null ? undefined : _b.type) === "enabled";
+    const thinkingBudget = (_c = anthropicOptions == null ? undefined : anthropicOptions.thinking) == null ? undefined : _c.budgetTokens;
+    const baseArgs = {
+      model: this.modelId,
+      max_tokens: maxOutputTokens,
+      temperature,
+      top_k: topK,
+      top_p: topP,
+      stop_sequences: stopSequences,
+      ...isThinking && {
+        thinking: { type: "enabled", budget_tokens: thinkingBudget }
+      },
+      system: messagesPrompt.system,
+      messages: messagesPrompt.messages
+    };
+    if (isThinking) {
+      if (thinkingBudget == null) {
+        throw new UnsupportedFunctionalityError({
+          functionality: "thinking requires a budget"
+        });
+      }
+      if (baseArgs.temperature != null) {
+        baseArgs.temperature = undefined;
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "temperature",
+          details: "temperature is not supported when thinking is enabled"
+        });
+      }
+      if (topK != null) {
+        baseArgs.top_k = undefined;
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "topK",
+          details: "topK is not supported when thinking is enabled"
+        });
+      }
+      if (topP != null) {
+        baseArgs.top_p = undefined;
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "topP",
+          details: "topP is not supported when thinking is enabled"
+        });
+      }
+      baseArgs.max_tokens = maxOutputTokens + thinkingBudget;
+    }
+    const {
+      tools: anthropicTools2,
+      toolChoice: anthropicToolChoice,
+      toolWarnings,
+      betas: toolsBetas
+    } = prepareTools3(jsonResponseTool != null ? {
+      tools: [jsonResponseTool],
+      toolChoice: { type: "tool", toolName: jsonResponseTool.name },
+      disableParallelToolUse: anthropicOptions == null ? undefined : anthropicOptions.disableParallelToolUse
+    } : {
+      tools: tools != null ? tools : [],
+      toolChoice,
+      disableParallelToolUse: anthropicOptions == null ? undefined : anthropicOptions.disableParallelToolUse
+    });
+    return {
+      args: {
+        ...baseArgs,
+        tools: anthropicTools2,
+        tool_choice: anthropicToolChoice
+      },
+      warnings: [...warnings, ...toolWarnings],
+      betas: /* @__PURE__ */ new Set([...messagesBetas, ...toolsBetas]),
+      usesJsonResponseTool: jsonResponseTool != null
+    };
+  }
+  async getHeaders({
+    betas,
+    headers
+  }) {
+    return combineHeaders(await resolve(this.config.headers), betas.size > 0 ? { "anthropic-beta": Array.from(betas).join(",") } : {}, headers);
+  }
+  buildRequestUrl(isStreaming) {
+    var _a15, _b, _c;
+    return (_c = (_b = (_a15 = this.config).buildRequestUrl) == null ? undefined : _b.call(_a15, this.config.baseURL, isStreaming)) != null ? _c : `${this.config.baseURL}/messages`;
+  }
+  transformRequestBody(args) {
+    var _a15, _b, _c;
+    return (_c = (_b = (_a15 = this.config).transformRequestBody) == null ? undefined : _b.call(_a15, args)) != null ? _c : args;
+  }
+  extractCitationDocuments(prompt) {
+    const isCitationPart = (part) => {
+      var _a15, _b;
+      if (part.type !== "file") {
+        return false;
+      }
+      if (part.mediaType !== "application/pdf" && part.mediaType !== "text/plain") {
+        return false;
+      }
+      const anthropic2 = (_a15 = part.providerOptions) == null ? undefined : _a15.anthropic;
+      const citationsConfig = anthropic2 == null ? undefined : anthropic2.citations;
+      return (_b = citationsConfig == null ? undefined : citationsConfig.enabled) != null ? _b : false;
+    };
+    return prompt.filter((message) => message.role === "user").flatMap((message) => message.content).filter(isCitationPart).map((part) => {
+      var _a15;
+      const filePart = part;
+      return {
+        title: (_a15 = filePart.filename) != null ? _a15 : "Untitled Document",
+        filename: filePart.filename,
+        mediaType: filePart.mediaType
+      };
+    });
+  }
+  async doGenerate(options) {
+    var _a15, _b, _c, _d, _e;
+    const { args, warnings, betas, usesJsonResponseTool } = await this.getArgs(options);
+    const citationDocuments = this.extractCitationDocuments(options.prompt);
+    const {
+      responseHeaders,
+      value: response,
+      rawValue: rawResponse
+    } = await postJsonToApi({
+      url: this.buildRequestUrl(false),
+      headers: await this.getHeaders({ betas, headers: options.headers }),
+      body: this.transformRequestBody(args),
+      failedResponseHandler: anthropicFailedResponseHandler2,
+      successfulResponseHandler: createJsonResponseHandler(anthropicMessagesResponseSchema2),
+      abortSignal: options.abortSignal,
+      fetch: this.config.fetch
+    });
+    const content = [];
+    for (const part of response.content) {
+      switch (part.type) {
+        case "text": {
+          if (!usesJsonResponseTool) {
+            content.push({ type: "text", text: part.text });
+            if (part.citations) {
+              for (const citation of part.citations) {
+                processCitation2(citation, citationDocuments, this.generateId, (source) => content.push(source));
+              }
+            }
+          }
+          break;
+        }
+        case "thinking": {
+          content.push({
+            type: "reasoning",
+            text: part.thinking,
+            providerMetadata: {
+              anthropic: {
+                signature: part.signature
+              }
+            }
+          });
+          break;
+        }
+        case "redacted_thinking": {
+          content.push({
+            type: "reasoning",
+            text: "",
+            providerMetadata: {
+              anthropic: {
+                redactedData: part.data
+              }
+            }
+          });
+          break;
+        }
+        case "tool_use": {
+          content.push(usesJsonResponseTool ? {
+            type: "text",
+            text: JSON.stringify(part.input)
+          } : {
+            type: "tool-call",
+            toolCallId: part.id,
+            toolName: part.name,
+            input: JSON.stringify(part.input)
+          });
+          break;
+        }
+        case "server_tool_use": {
+          if (part.name === "web_search") {
+            content.push({
+              type: "tool-call",
+              toolCallId: part.id,
+              toolName: part.name,
+              input: JSON.stringify(part.input),
+              providerExecuted: true
+            });
+          }
+          break;
+        }
+        case "web_search_tool_result": {
+          if (Array.isArray(part.content)) {
+            content.push({
+              type: "tool-result",
+              toolCallId: part.tool_use_id,
+              toolName: "web_search",
+              result: part.content.map((result) => {
+                var _a22;
+                return {
+                  url: result.url,
+                  title: result.title,
+                  pageAge: (_a22 = result.page_age) != null ? _a22 : null,
+                  encryptedContent: result.encrypted_content,
+                  type: result.type
+                };
+              }),
+              providerExecuted: true
+            });
+            for (const result of part.content) {
+              content.push({
+                type: "source",
+                sourceType: "url",
+                id: this.generateId(),
+                url: result.url,
+                title: result.title,
+                providerMetadata: {
+                  anthropic: {
+                    pageAge: (_a15 = result.page_age) != null ? _a15 : null
+                  }
+                }
+              });
+            }
+          } else {
+            content.push({
+              type: "tool-result",
+              toolCallId: part.tool_use_id,
+              toolName: "web_search",
+              isError: true,
+              result: {
+                type: "web_search_tool_result_error",
+                errorCode: part.content.error_code
+              },
+              providerExecuted: true
+            });
+          }
+          break;
+        }
+      }
+    }
+    return {
+      content,
+      finishReason: mapAnthropicStopReason2({
+        finishReason: response.stop_reason,
+        isJsonResponseFromTool: usesJsonResponseTool
+      }),
+      usage: {
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+        totalTokens: response.usage.input_tokens + response.usage.output_tokens,
+        cachedInputTokens: (_b = response.usage.cache_read_input_tokens) != null ? _b : undefined
+      },
+      request: { body: args },
+      response: {
+        id: (_c = response.id) != null ? _c : undefined,
+        modelId: (_d = response.model) != null ? _d : undefined,
+        headers: responseHeaders,
+        body: rawResponse
+      },
+      warnings,
+      providerMetadata: {
+        anthropic: {
+          usage: response.usage,
+          cacheCreationInputTokens: (_e = response.usage.cache_creation_input_tokens) != null ? _e : null
+        }
+      }
+    };
+  }
+  async doStream(options) {
+    const { args, warnings, betas, usesJsonResponseTool } = await this.getArgs(options);
+    const citationDocuments = this.extractCitationDocuments(options.prompt);
+    const body = { ...args, stream: true };
+    const { responseHeaders, value: response } = await postJsonToApi({
+      url: this.buildRequestUrl(true),
+      headers: await this.getHeaders({ betas, headers: options.headers }),
+      body: this.transformRequestBody(body),
+      failedResponseHandler: anthropicFailedResponseHandler2,
+      successfulResponseHandler: createEventSourceResponseHandler(anthropicMessagesChunkSchema2),
+      abortSignal: options.abortSignal,
+      fetch: this.config.fetch
+    });
+    let finishReason = "unknown";
+    const usage = {
+      inputTokens: undefined,
+      outputTokens: undefined,
+      totalTokens: undefined
+    };
+    const contentBlocks = {};
+    let providerMetadata = undefined;
+    let blockType = undefined;
+    const generateId3 = this.generateId;
+    return {
+      stream: response.pipeThrough(new TransformStream({
+        start(controller) {
+          controller.enqueue({ type: "stream-start", warnings });
+        },
+        transform(chunk, controller) {
+          var _a15, _b, _c, _d, _e, _f, _g;
+          if (options.includeRawChunks) {
+            controller.enqueue({ type: "raw", rawValue: chunk.rawValue });
+          }
+          if (!chunk.success) {
+            controller.enqueue({ type: "error", error: chunk.error });
+            return;
+          }
+          const value = chunk.value;
+          switch (value.type) {
+            case "ping": {
+              return;
+            }
+            case "content_block_start": {
+              const contentBlockType = value.content_block.type;
+              blockType = contentBlockType;
+              switch (contentBlockType) {
+                case "text": {
+                  contentBlocks[value.index] = { type: "text" };
+                  controller.enqueue({
+                    type: "text-start",
+                    id: String(value.index)
+                  });
+                  return;
+                }
+                case "thinking": {
+                  contentBlocks[value.index] = { type: "reasoning" };
+                  controller.enqueue({
+                    type: "reasoning-start",
+                    id: String(value.index)
+                  });
+                  return;
+                }
+                case "redacted_thinking": {
+                  contentBlocks[value.index] = { type: "reasoning" };
+                  controller.enqueue({
+                    type: "reasoning-start",
+                    id: String(value.index),
+                    providerMetadata: {
+                      anthropic: {
+                        redactedData: value.content_block.data
+                      }
+                    }
+                  });
+                  return;
+                }
+                case "tool_use": {
+                  contentBlocks[value.index] = usesJsonResponseTool ? { type: "text" } : {
+                    type: "tool-call",
+                    toolCallId: value.content_block.id,
+                    toolName: value.content_block.name,
+                    input: ""
+                  };
+                  controller.enqueue(usesJsonResponseTool ? { type: "text-start", id: String(value.index) } : {
+                    type: "tool-input-start",
+                    id: value.content_block.id,
+                    toolName: value.content_block.name
+                  });
+                  return;
+                }
+                case "server_tool_use": {
+                  if (value.content_block.name === "web_search") {
+                    contentBlocks[value.index] = {
+                      type: "tool-call",
+                      toolCallId: value.content_block.id,
+                      toolName: value.content_block.name,
+                      input: "",
+                      providerExecuted: true
+                    };
+                    controller.enqueue({
+                      type: "tool-input-start",
+                      id: value.content_block.id,
+                      toolName: value.content_block.name,
+                      providerExecuted: true
+                    });
+                  }
+                  return;
+                }
+                case "web_search_tool_result": {
+                  const part = value.content_block;
+                  if (Array.isArray(part.content)) {
+                    controller.enqueue({
+                      type: "tool-result",
+                      toolCallId: part.tool_use_id,
+                      toolName: "web_search",
+                      result: part.content.map((result) => {
+                        var _a22;
+                        return {
+                          url: result.url,
+                          title: result.title,
+                          pageAge: (_a22 = result.page_age) != null ? _a22 : null,
+                          encryptedContent: result.encrypted_content,
+                          type: result.type
+                        };
+                      }),
+                      providerExecuted: true
+                    });
+                    for (const result of part.content) {
+                      controller.enqueue({
+                        type: "source",
+                        sourceType: "url",
+                        id: generateId3(),
+                        url: result.url,
+                        title: result.title,
+                        providerMetadata: {
+                          anthropic: {
+                            pageAge: (_a15 = result.page_age) != null ? _a15 : null
+                          }
+                        }
+                      });
+                    }
+                  } else {
+                    controller.enqueue({
+                      type: "tool-result",
+                      toolCallId: part.tool_use_id,
+                      toolName: "web_search",
+                      isError: true,
+                      result: {
+                        type: "web_search_tool_result_error",
+                        errorCode: part.content.error_code
+                      },
+                      providerExecuted: true
+                    });
+                  }
+                  return;
+                }
+                default: {
+                  const _exhaustiveCheck = contentBlockType;
+                  throw new Error(`Unsupported content block type: ${_exhaustiveCheck}`);
+                }
+              }
+            }
+            case "content_block_stop": {
+              if (contentBlocks[value.index] != null) {
+                const contentBlock = contentBlocks[value.index];
+                switch (contentBlock.type) {
+                  case "text": {
+                    controller.enqueue({
+                      type: "text-end",
+                      id: String(value.index)
+                    });
+                    break;
+                  }
+                  case "reasoning": {
+                    controller.enqueue({
+                      type: "reasoning-end",
+                      id: String(value.index)
+                    });
+                    break;
+                  }
+                  case "tool-call":
+                    if (!usesJsonResponseTool) {
+                      controller.enqueue({
+                        type: "tool-input-end",
+                        id: contentBlock.toolCallId
+                      });
+                      controller.enqueue(contentBlock);
+                    }
+                    break;
+                }
+                delete contentBlocks[value.index];
+              }
+              blockType = undefined;
+              return;
+            }
+            case "content_block_delta": {
+              const deltaType = value.delta.type;
+              switch (deltaType) {
+                case "text_delta": {
+                  if (usesJsonResponseTool) {
+                    return;
+                  }
+                  controller.enqueue({
+                    type: "text-delta",
+                    id: String(value.index),
+                    delta: value.delta.text
+                  });
+                  return;
+                }
+                case "thinking_delta": {
+                  controller.enqueue({
+                    type: "reasoning-delta",
+                    id: String(value.index),
+                    delta: value.delta.thinking
+                  });
+                  return;
+                }
+                case "signature_delta": {
+                  if (blockType === "thinking") {
+                    controller.enqueue({
+                      type: "reasoning-delta",
+                      id: String(value.index),
+                      delta: "",
+                      providerMetadata: {
+                        anthropic: {
+                          signature: value.delta.signature
+                        }
+                      }
+                    });
+                  }
+                  return;
+                }
+                case "input_json_delta": {
+                  const contentBlock = contentBlocks[value.index];
+                  const delta = value.delta.partial_json;
+                  if (usesJsonResponseTool) {
+                    if ((contentBlock == null ? undefined : contentBlock.type) !== "text") {
+                      return;
+                    }
+                    controller.enqueue({
+                      type: "text-delta",
+                      id: String(value.index),
+                      delta
+                    });
+                  } else {
+                    if ((contentBlock == null ? undefined : contentBlock.type) !== "tool-call") {
+                      return;
+                    }
+                    controller.enqueue({
+                      type: "tool-input-delta",
+                      id: contentBlock.toolCallId,
+                      delta
+                    });
+                    contentBlock.input += delta;
+                  }
+                  return;
+                }
+                case "citations_delta": {
+                  const citation = value.delta.citation;
+                  processCitation2(citation, citationDocuments, generateId3, (source) => controller.enqueue(source));
+                  return;
+                }
+                default: {
+                  const _exhaustiveCheck = deltaType;
+                  throw new Error(`Unsupported delta type: ${_exhaustiveCheck}`);
+                }
+              }
+            }
+            case "message_start": {
+              usage.inputTokens = value.message.usage.input_tokens;
+              usage.cachedInputTokens = (_b = value.message.usage.cache_read_input_tokens) != null ? _b : undefined;
+              providerMetadata = {
+                anthropic: {
+                  usage: value.message.usage,
+                  cacheCreationInputTokens: (_c = value.message.usage.cache_creation_input_tokens) != null ? _c : null
+                }
+              };
+              controller.enqueue({
+                type: "response-metadata",
+                id: (_d = value.message.id) != null ? _d : undefined,
+                modelId: (_e = value.message.model) != null ? _e : undefined
+              });
+              return;
+            }
+            case "message_delta": {
+              usage.outputTokens = value.usage.output_tokens;
+              usage.totalTokens = ((_f = usage.inputTokens) != null ? _f : 0) + ((_g = value.usage.output_tokens) != null ? _g : 0);
+              finishReason = mapAnthropicStopReason2({
+                finishReason: value.delta.stop_reason,
+                isJsonResponseFromTool: usesJsonResponseTool
+              });
+              return;
+            }
+            case "message_stop": {
+              controller.enqueue({
+                type: "finish",
+                finishReason,
+                usage,
+                providerMetadata
+              });
+              return;
+            }
+            case "error": {
+              controller.enqueue({ type: "error", error: value.error });
+              return;
+            }
+            default: {
+              const _exhaustiveCheck = value;
+              throw new Error(`Unsupported chunk type: ${_exhaustiveCheck}`);
+            }
+          }
+        }
+      })),
+      request: { body },
+      response: { headers: responseHeaders }
+    };
+  }
+};
+var anthropicMessagesResponseSchema2 = exports_external.object({
+  type: exports_external.literal("message"),
+  id: exports_external.string().nullish(),
+  model: exports_external.string().nullish(),
+  content: exports_external.array(exports_external.discriminatedUnion("type", [
+    exports_external.object({
+      type: exports_external.literal("text"),
+      text: exports_external.string(),
+      citations: exports_external.array(citationSchema2).optional()
+    }),
+    exports_external.object({
+      type: exports_external.literal("thinking"),
+      thinking: exports_external.string(),
+      signature: exports_external.string()
+    }),
+    exports_external.object({
+      type: exports_external.literal("redacted_thinking"),
+      data: exports_external.string()
+    }),
+    exports_external.object({
+      type: exports_external.literal("tool_use"),
+      id: exports_external.string(),
+      name: exports_external.string(),
+      input: exports_external.unknown()
+    }),
+    exports_external.object({
+      type: exports_external.literal("server_tool_use"),
+      id: exports_external.string(),
+      name: exports_external.string(),
+      input: exports_external.record(exports_external.string(), exports_external.unknown()).nullish()
+    }),
+    exports_external.object({
+      type: exports_external.literal("web_search_tool_result"),
+      tool_use_id: exports_external.string(),
+      content: exports_external.union([
+        exports_external.array(exports_external.object({
+          type: exports_external.literal("web_search_result"),
+          url: exports_external.string(),
+          title: exports_external.string(),
+          encrypted_content: exports_external.string(),
+          page_age: exports_external.string().nullish()
+        })),
+        exports_external.object({
+          type: exports_external.literal("web_search_tool_result_error"),
+          error_code: exports_external.string()
+        })
+      ])
+    })
+  ])),
+  stop_reason: exports_external.string().nullish(),
+  usage: exports_external.looseObject({
+    input_tokens: exports_external.number(),
+    output_tokens: exports_external.number(),
+    cache_creation_input_tokens: exports_external.number().nullish(),
+    cache_read_input_tokens: exports_external.number().nullish()
+  })
+});
+var anthropicMessagesChunkSchema2 = exports_external.discriminatedUnion("type", [
+  exports_external.object({
+    type: exports_external.literal("message_start"),
+    message: exports_external.object({
+      id: exports_external.string().nullish(),
+      model: exports_external.string().nullish(),
+      usage: exports_external.looseObject({
+        input_tokens: exports_external.number(),
+        output_tokens: exports_external.number(),
+        cache_creation_input_tokens: exports_external.number().nullish(),
+        cache_read_input_tokens: exports_external.number().nullish()
+      })
+    })
+  }),
+  exports_external.object({
+    type: exports_external.literal("content_block_start"),
+    index: exports_external.number(),
+    content_block: exports_external.discriminatedUnion("type", [
+      exports_external.object({
+        type: exports_external.literal("text"),
+        text: exports_external.string()
+      }),
+      exports_external.object({
+        type: exports_external.literal("thinking"),
+        thinking: exports_external.string()
+      }),
+      exports_external.object({
+        type: exports_external.literal("tool_use"),
+        id: exports_external.string(),
+        name: exports_external.string()
+      }),
+      exports_external.object({
+        type: exports_external.literal("redacted_thinking"),
+        data: exports_external.string()
+      }),
+      exports_external.object({
+        type: exports_external.literal("server_tool_use"),
+        id: exports_external.string(),
+        name: exports_external.string(),
+        input: exports_external.record(exports_external.string(), exports_external.unknown()).nullish()
+      }),
+      exports_external.object({
+        type: exports_external.literal("web_search_tool_result"),
+        tool_use_id: exports_external.string(),
+        content: exports_external.union([
+          exports_external.array(exports_external.object({
+            type: exports_external.literal("web_search_result"),
+            url: exports_external.string(),
+            title: exports_external.string(),
+            encrypted_content: exports_external.string(),
+            page_age: exports_external.string().nullish()
+          })),
+          exports_external.object({
+            type: exports_external.literal("web_search_tool_result_error"),
+            error_code: exports_external.string()
+          })
+        ])
+      })
+    ])
+  }),
+  exports_external.object({
+    type: exports_external.literal("content_block_delta"),
+    index: exports_external.number(),
+    delta: exports_external.discriminatedUnion("type", [
+      exports_external.object({
+        type: exports_external.literal("input_json_delta"),
+        partial_json: exports_external.string()
+      }),
+      exports_external.object({
+        type: exports_external.literal("text_delta"),
+        text: exports_external.string()
+      }),
+      exports_external.object({
+        type: exports_external.literal("thinking_delta"),
+        thinking: exports_external.string()
+      }),
+      exports_external.object({
+        type: exports_external.literal("signature_delta"),
+        signature: exports_external.string()
+      }),
+      exports_external.object({
+        type: exports_external.literal("citations_delta"),
+        citation: citationSchema2
+      })
+    ])
+  }),
+  exports_external.object({
+    type: exports_external.literal("content_block_stop"),
+    index: exports_external.number()
+  }),
+  exports_external.object({
+    type: exports_external.literal("error"),
+    error: exports_external.object({
+      type: exports_external.string(),
+      message: exports_external.string()
+    })
+  }),
+  exports_external.object({
+    type: exports_external.literal("message_delta"),
+    delta: exports_external.object({ stop_reason: exports_external.string().nullish() }),
+    usage: exports_external.object({ output_tokens: exports_external.number() })
+  }),
+  exports_external.object({
+    type: exports_external.literal("message_stop")
+  }),
+  exports_external.object({
+    type: exports_external.literal("ping")
+  })
+]);
+var anthropicReasoningMetadataSchema2 = exports_external.object({
+  signature: exports_external.string().optional(),
+  redactedData: exports_external.string().optional()
+});
+var bash_202410222 = createProviderDefinedToolFactory({
+  id: "anthropic.bash_20241022",
+  name: "bash",
+  inputSchema: v4_default.object({
+    command: v4_default.string(),
+    restart: v4_default.boolean().optional()
+  })
+});
+var bash_202501242 = createProviderDefinedToolFactory({
+  id: "anthropic.bash_20250124",
+  name: "bash",
+  inputSchema: v4_default.object({
+    command: v4_default.string(),
+    restart: v4_default.boolean().optional()
+  })
+});
+var computer_202410222 = createProviderDefinedToolFactory({
+  id: "anthropic.computer_20241022",
+  name: "computer",
+  inputSchema: exports_external.object({
+    action: exports_external.enum([
+      "key",
+      "type",
+      "mouse_move",
+      "left_click",
+      "left_click_drag",
+      "right_click",
+      "middle_click",
+      "double_click",
+      "screenshot",
+      "cursor_position"
+    ]),
+    coordinate: exports_external.array(exports_external.number().int()).optional(),
+    text: exports_external.string().optional()
+  })
+});
+var computer_202501242 = createProviderDefinedToolFactory({
+  id: "anthropic.computer_20250124",
+  name: "computer",
+  inputSchema: exports_external.object({
+    action: exports_external.enum([
+      "key",
+      "hold_key",
+      "type",
+      "cursor_position",
+      "mouse_move",
+      "left_mouse_down",
+      "left_mouse_up",
+      "left_click",
+      "left_click_drag",
+      "right_click",
+      "middle_click",
+      "double_click",
+      "triple_click",
+      "scroll",
+      "wait",
+      "screenshot"
+    ]),
+    coordinate: exports_external.tuple([exports_external.number().int(), exports_external.number().int()]).optional(),
+    duration: exports_external.number().optional(),
+    scroll_amount: exports_external.number().optional(),
+    scroll_direction: exports_external.enum(["up", "down", "left", "right"]).optional(),
+    start_coordinate: exports_external.tuple([exports_external.number().int(), exports_external.number().int()]).optional(),
+    text: exports_external.string().optional()
+  })
+});
+var textEditor_202410222 = createProviderDefinedToolFactory({
+  id: "anthropic.text_editor_20241022",
+  name: "str_replace_editor",
+  inputSchema: exports_external.object({
+    command: exports_external.enum(["view", "create", "str_replace", "insert", "undo_edit"]),
+    path: exports_external.string(),
+    file_text: exports_external.string().optional(),
+    insert_line: exports_external.number().int().optional(),
+    new_str: exports_external.string().optional(),
+    old_str: exports_external.string().optional(),
+    view_range: exports_external.array(exports_external.number().int()).optional()
+  })
+});
+var textEditor_202501242 = createProviderDefinedToolFactory({
+  id: "anthropic.text_editor_20250124",
+  name: "str_replace_editor",
+  inputSchema: exports_external.object({
+    command: exports_external.enum(["view", "create", "str_replace", "insert", "undo_edit"]),
+    path: exports_external.string(),
+    file_text: exports_external.string().optional(),
+    insert_line: exports_external.number().int().optional(),
+    new_str: exports_external.string().optional(),
+    old_str: exports_external.string().optional(),
+    view_range: exports_external.array(exports_external.number().int()).optional()
+  })
+});
+var textEditor_202504292 = createProviderDefinedToolFactory({
+  id: "anthropic.text_editor_20250429",
+  name: "str_replace_based_edit_tool",
+  inputSchema: exports_external.object({
+    command: exports_external.enum(["view", "create", "str_replace", "insert"]),
+    path: exports_external.string(),
+    file_text: exports_external.string().optional(),
+    insert_line: exports_external.number().int().optional(),
+    new_str: exports_external.string().optional(),
+    old_str: exports_external.string().optional(),
+    view_range: exports_external.array(exports_external.number().int()).optional()
+  })
+});
+var anthropicTools2 = {
+  bash_20241022: bash_202410222,
+  bash_20250124: bash_202501242,
+  textEditor_20241022: textEditor_202410222,
+  textEditor_20250124: textEditor_202501242,
+  textEditor_20250429: textEditor_202504292,
+  computer_20241022: computer_202410222,
+  computer_20250124: computer_202501242,
+  webSearch_20250305: webSearch_202503052
+};
+function createAnthropic2(options = {}) {
+  var _a15;
+  const baseURL = (_a15 = withoutTrailingSlash(options.baseURL)) != null ? _a15 : "https://api.anthropic.com/v1";
+  const getHeaders = () => ({
+    "anthropic-version": "2023-06-01",
+    "x-api-key": loadApiKey({
+      apiKey: options.apiKey,
+      environmentVariableName: "ANTHROPIC_API_KEY",
+      description: "Anthropic"
+    }),
+    ...options.headers
+  });
+  const createChatModel = (modelId) => {
+    var _a22;
+    return new AnthropicMessagesLanguageModel2(modelId, {
+      provider: "anthropic.messages",
+      baseURL,
+      headers: getHeaders,
+      fetch: options.fetch,
+      generateId: (_a22 = options.generateId) != null ? _a22 : generateId,
+      supportedUrls: () => ({
+        "image/*": [/^https?:\/\/.*$/]
+      })
+    });
+  };
+  const provider = function(modelId) {
+    if (new.target) {
+      throw new Error("The Anthropic model function cannot be called with the new keyword.");
+    }
+    return createChatModel(modelId);
+  };
+  provider.languageModel = createChatModel;
+  provider.chat = createChatModel;
+  provider.messages = createChatModel;
+  provider.textEmbeddingModel = (modelId) => {
+    throw new NoSuchModelError({ modelId, modelType: "textEmbeddingModel" });
+  };
+  provider.imageModel = (modelId) => {
+    throw new NoSuchModelError({ modelId, modelType: "imageModel" });
+  };
+  provider.tools = anthropicTools2;
+  return provider;
+}
+var anthropic2 = createAnthropic2();
+
+// ../../node_modules/@ai-sdk/openai/dist/index.mjs
+function convertToOpenAIChatMessages2({
+  prompt,
+  systemMessageMode = "system"
+}) {
+  const messages = [];
+  const warnings = [];
+  for (const { role, content } of prompt) {
+    switch (role) {
+      case "system": {
+        switch (systemMessageMode) {
+          case "system": {
+            messages.push({ role: "system", content });
+            break;
+          }
+          case "developer": {
+            messages.push({ role: "developer", content });
+            break;
+          }
+          case "remove": {
+            warnings.push({
+              type: "other",
+              message: "system messages are removed for this model"
+            });
+            break;
+          }
+          default: {
+            const _exhaustiveCheck = systemMessageMode;
+            throw new Error(`Unsupported system message mode: ${_exhaustiveCheck}`);
+          }
+        }
+        break;
+      }
+      case "user": {
+        if (content.length === 1 && content[0].type === "text") {
+          messages.push({ role: "user", content: content[0].text });
+          break;
+        }
+        messages.push({
+          role: "user",
+          content: content.map((part, index) => {
+            var _a15, _b, _c;
+            switch (part.type) {
+              case "text": {
+                return { type: "text", text: part.text };
+              }
+              case "file": {
+                if (part.mediaType.startsWith("image/")) {
+                  const mediaType = part.mediaType === "image/*" ? "image/jpeg" : part.mediaType;
+                  return {
+                    type: "image_url",
+                    image_url: {
+                      url: part.data instanceof URL ? part.data.toString() : `data:${mediaType};base64,${convertToBase64(part.data)}`,
+                      detail: (_b = (_a15 = part.providerOptions) == null ? undefined : _a15.openai) == null ? undefined : _b.imageDetail
+                    }
+                  };
+                } else if (part.mediaType.startsWith("audio/")) {
+                  if (part.data instanceof URL) {
+                    throw new UnsupportedFunctionalityError({
+                      functionality: "audio file parts with URLs"
+                    });
+                  }
+                  switch (part.mediaType) {
+                    case "audio/wav": {
+                      return {
+                        type: "input_audio",
+                        input_audio: {
+                          data: convertToBase64(part.data),
+                          format: "wav"
+                        }
+                      };
+                    }
+                    case "audio/mp3":
+                    case "audio/mpeg": {
+                      return {
+                        type: "input_audio",
+                        input_audio: {
+                          data: convertToBase64(part.data),
+                          format: "mp3"
+                        }
+                      };
+                    }
+                    default: {
+                      throw new UnsupportedFunctionalityError({
+                        functionality: `audio content parts with media type ${part.mediaType}`
+                      });
+                    }
+                  }
+                } else if (part.mediaType === "application/pdf") {
+                  if (part.data instanceof URL) {
+                    throw new UnsupportedFunctionalityError({
+                      functionality: "PDF file parts with URLs"
+                    });
+                  }
+                  return {
+                    type: "file",
+                    file: {
+                      filename: (_c = part.filename) != null ? _c : `part-${index}.pdf`,
+                      file_data: `data:application/pdf;base64,${convertToBase64(part.data)}`
+                    }
+                  };
+                } else {
+                  throw new UnsupportedFunctionalityError({
+                    functionality: `file part media type ${part.mediaType}`
+                  });
+                }
+              }
+            }
+          })
+        });
+        break;
+      }
+      case "assistant": {
+        let text = "";
+        const toolCalls = [];
+        for (const part of content) {
+          switch (part.type) {
+            case "text": {
+              text += part.text;
+              break;
+            }
+            case "tool-call": {
+              toolCalls.push({
+                id: part.toolCallId,
+                type: "function",
+                function: {
+                  name: part.toolName,
+                  arguments: JSON.stringify(part.input)
+                }
+              });
+              break;
+            }
+          }
+        }
+        messages.push({
+          role: "assistant",
+          content: text,
+          tool_calls: toolCalls.length > 0 ? toolCalls : undefined
+        });
+        break;
+      }
+      case "tool": {
+        for (const toolResponse of content) {
+          const output = toolResponse.output;
+          let contentValue;
+          switch (output.type) {
+            case "text":
+            case "error-text":
+              contentValue = output.value;
+              break;
+            case "content":
+            case "json":
+            case "error-json":
+              contentValue = JSON.stringify(output.value);
+              break;
+          }
+          messages.push({
+            role: "tool",
+            tool_call_id: toolResponse.toolCallId,
+            content: contentValue
+          });
+        }
+        break;
+      }
+      default: {
+        const _exhaustiveCheck = role;
+        throw new Error(`Unsupported role: ${_exhaustiveCheck}`);
+      }
+    }
+  }
+  return { messages, warnings };
+}
+function getResponseMetadata2({
+  id,
+  model,
+  created
+}) {
+  return {
+    id: id != null ? id : undefined,
+    modelId: model != null ? model : undefined,
+    timestamp: created != null ? new Date(created * 1000) : undefined
+  };
+}
+function mapOpenAIFinishReason2(finishReason) {
+  switch (finishReason) {
+    case "stop":
+      return "stop";
+    case "length":
+      return "length";
+    case "content_filter":
+      return "content-filter";
+    case "function_call":
+    case "tool_calls":
+      return "tool-calls";
+    default:
+      return "unknown";
+  }
+}
+var openaiProviderOptions2 = exports_external.object({
+  logitBias: exports_external.record(exports_external.coerce.number(), exports_external.number()).optional(),
+  logprobs: exports_external.union([exports_external.boolean(), exports_external.number()]).optional(),
+  parallelToolCalls: exports_external.boolean().optional(),
+  user: exports_external.string().optional(),
+  reasoningEffort: exports_external.enum(["low", "medium", "high"]).optional(),
+  maxCompletionTokens: exports_external.number().optional(),
+  store: exports_external.boolean().optional(),
+  metadata: exports_external.record(exports_external.string().max(64), exports_external.string().max(512)).optional(),
+  prediction: exports_external.record(exports_external.string(), exports_external.any()).optional(),
+  structuredOutputs: exports_external.boolean().optional(),
+  serviceTier: exports_external.enum(["auto", "flex", "priority"]).optional(),
+  strictJsonSchema: exports_external.boolean().optional()
+});
+var openaiErrorDataSchema2 = exports_external.object({
+  error: exports_external.object({
+    message: exports_external.string(),
+    type: exports_external.string().nullish(),
+    param: exports_external.any().nullish(),
+    code: exports_external.union([exports_external.string(), exports_external.number()]).nullish()
+  })
+});
+var openaiFailedResponseHandler2 = createJsonErrorResponseHandler({
+  errorSchema: openaiErrorDataSchema2,
+  errorToMessage: (data) => data.error.message
+});
+var comparisonFilterSchema2 = exports_external.object({
+  key: exports_external.string(),
+  type: exports_external.enum(["eq", "ne", "gt", "gte", "lt", "lte"]),
+  value: exports_external.union([exports_external.string(), exports_external.number(), exports_external.boolean()])
+});
+var compoundFilterSchema2 = exports_external.object({
+  type: exports_external.enum(["and", "or"]),
+  filters: exports_external.array(exports_external.union([comparisonFilterSchema2, exports_external.lazy(() => compoundFilterSchema2)]))
+});
+var filtersSchema2 = exports_external.union([comparisonFilterSchema2, compoundFilterSchema2]);
+var fileSearchArgsSchema2 = exports_external.object({
+  vectorStoreIds: exports_external.array(exports_external.string()).optional(),
+  maxNumResults: exports_external.number().optional(),
+  ranking: exports_external.object({
+    ranker: exports_external.enum(["auto", "default-2024-08-21"]).optional()
+  }).optional(),
+  filters: filtersSchema2.optional()
+});
+var fileSearch2 = createProviderDefinedToolFactory({
+  id: "openai.file_search",
+  name: "file_search",
+  inputSchema: exports_external.object({
+    query: exports_external.string()
+  })
+});
+var webSearchPreviewArgsSchema2 = exports_external.object({
+  searchContextSize: exports_external.enum(["low", "medium", "high"]).optional(),
+  userLocation: exports_external.object({
+    type: exports_external.literal("approximate"),
+    country: exports_external.string().optional(),
+    city: exports_external.string().optional(),
+    region: exports_external.string().optional(),
+    timezone: exports_external.string().optional()
+  }).optional()
+});
+var webSearchPreview2 = createProviderDefinedToolFactory({
+  id: "openai.web_search_preview",
+  name: "web_search_preview",
+  inputSchema: exports_external.object({})
+});
+function prepareTools4({
+  tools,
+  toolChoice,
+  structuredOutputs,
+  strictJsonSchema
+}) {
+  tools = (tools == null ? undefined : tools.length) ? tools : undefined;
+  const toolWarnings = [];
+  if (tools == null) {
+    return { tools: undefined, toolChoice: undefined, toolWarnings };
+  }
+  const openaiTools2 = [];
+  for (const tool2 of tools) {
+    switch (tool2.type) {
+      case "function":
+        openaiTools2.push({
+          type: "function",
+          function: {
+            name: tool2.name,
+            description: tool2.description,
+            parameters: tool2.inputSchema,
+            strict: structuredOutputs ? strictJsonSchema : undefined
+          }
+        });
+        break;
+      case "provider-defined":
+        switch (tool2.id) {
+          case "openai.file_search": {
+            const args = fileSearchArgsSchema2.parse(tool2.args);
+            openaiTools2.push({
+              type: "file_search",
+              vector_store_ids: args.vectorStoreIds,
+              max_num_results: args.maxNumResults,
+              ranking_options: args.ranking ? { ranker: args.ranking.ranker } : undefined,
+              filters: args.filters
+            });
+            break;
+          }
+          case "openai.web_search_preview": {
+            const args = webSearchPreviewArgsSchema2.parse(tool2.args);
+            openaiTools2.push({
+              type: "web_search_preview",
+              search_context_size: args.searchContextSize,
+              user_location: args.userLocation
+            });
+            break;
+          }
+          default:
+            toolWarnings.push({ type: "unsupported-tool", tool: tool2 });
+            break;
+        }
+        break;
+      default:
+        toolWarnings.push({ type: "unsupported-tool", tool: tool2 });
+        break;
+    }
+  }
+  if (toolChoice == null) {
+    return { tools: openaiTools2, toolChoice: undefined, toolWarnings };
+  }
+  const type = toolChoice.type;
+  switch (type) {
+    case "auto":
+    case "none":
+    case "required":
+      return { tools: openaiTools2, toolChoice: type, toolWarnings };
+    case "tool":
+      return {
+        tools: openaiTools2,
+        toolChoice: {
+          type: "function",
+          function: {
+            name: toolChoice.toolName
+          }
+        },
+        toolWarnings
+      };
+    default: {
+      const _exhaustiveCheck = type;
+      throw new UnsupportedFunctionalityError({
+        functionality: `tool choice type: ${_exhaustiveCheck}`
+      });
+    }
+  }
+}
+var OpenAIChatLanguageModel2 = class {
+  constructor(modelId, config2) {
+    this.specificationVersion = "v2";
+    this.supportedUrls = {
+      "image/*": [/^https?:\/\/.*$/]
+    };
+    this.modelId = modelId;
+    this.config = config2;
+  }
+  get provider() {
+    return this.config.provider;
+  }
+  async getArgs({
+    prompt,
+    maxOutputTokens,
+    temperature,
+    topP,
+    topK,
+    frequencyPenalty,
+    presencePenalty,
+    stopSequences,
+    responseFormat,
+    seed,
+    tools,
+    toolChoice,
+    providerOptions
+  }) {
+    var _a15, _b, _c, _d;
+    const warnings = [];
+    const openaiOptions = (_a15 = await parseProviderOptions({
+      provider: "openai",
+      providerOptions,
+      schema: openaiProviderOptions2
+    })) != null ? _a15 : {};
+    const structuredOutputs = (_b = openaiOptions.structuredOutputs) != null ? _b : true;
+    if (topK != null) {
+      warnings.push({
+        type: "unsupported-setting",
+        setting: "topK"
+      });
+    }
+    if ((responseFormat == null ? undefined : responseFormat.type) === "json" && responseFormat.schema != null && !structuredOutputs) {
+      warnings.push({
+        type: "unsupported-setting",
+        setting: "responseFormat",
+        details: "JSON response format schema is only supported with structuredOutputs"
+      });
+    }
+    const { messages, warnings: messageWarnings } = convertToOpenAIChatMessages2({
+      prompt,
+      systemMessageMode: getSystemMessageMode2(this.modelId)
+    });
+    warnings.push(...messageWarnings);
+    const strictJsonSchema = (_c = openaiOptions.strictJsonSchema) != null ? _c : false;
+    const baseArgs = {
+      model: this.modelId,
+      logit_bias: openaiOptions.logitBias,
+      logprobs: openaiOptions.logprobs === true || typeof openaiOptions.logprobs === "number" ? true : undefined,
+      top_logprobs: typeof openaiOptions.logprobs === "number" ? openaiOptions.logprobs : typeof openaiOptions.logprobs === "boolean" ? openaiOptions.logprobs ? 0 : undefined : undefined,
+      user: openaiOptions.user,
+      parallel_tool_calls: openaiOptions.parallelToolCalls,
+      max_tokens: maxOutputTokens,
+      temperature,
+      top_p: topP,
+      frequency_penalty: frequencyPenalty,
+      presence_penalty: presencePenalty,
+      response_format: (responseFormat == null ? undefined : responseFormat.type) === "json" ? structuredOutputs && responseFormat.schema != null ? {
+        type: "json_schema",
+        json_schema: {
+          schema: responseFormat.schema,
+          strict: strictJsonSchema,
+          name: (_d = responseFormat.name) != null ? _d : "response",
+          description: responseFormat.description
+        }
+      } : { type: "json_object" } : undefined,
+      stop: stopSequences,
+      seed,
+      max_completion_tokens: openaiOptions.maxCompletionTokens,
+      store: openaiOptions.store,
+      metadata: openaiOptions.metadata,
+      prediction: openaiOptions.prediction,
+      reasoning_effort: openaiOptions.reasoningEffort,
+      service_tier: openaiOptions.serviceTier,
+      messages
+    };
+    if (isReasoningModel2(this.modelId)) {
+      if (baseArgs.temperature != null) {
+        baseArgs.temperature = undefined;
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "temperature",
+          details: "temperature is not supported for reasoning models"
+        });
+      }
+      if (baseArgs.top_p != null) {
+        baseArgs.top_p = undefined;
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "topP",
+          details: "topP is not supported for reasoning models"
+        });
+      }
+      if (baseArgs.frequency_penalty != null) {
+        baseArgs.frequency_penalty = undefined;
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "frequencyPenalty",
+          details: "frequencyPenalty is not supported for reasoning models"
+        });
+      }
+      if (baseArgs.presence_penalty != null) {
+        baseArgs.presence_penalty = undefined;
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "presencePenalty",
+          details: "presencePenalty is not supported for reasoning models"
+        });
+      }
+      if (baseArgs.logit_bias != null) {
+        baseArgs.logit_bias = undefined;
+        warnings.push({
+          type: "other",
+          message: "logitBias is not supported for reasoning models"
+        });
+      }
+      if (baseArgs.logprobs != null) {
+        baseArgs.logprobs = undefined;
+        warnings.push({
+          type: "other",
+          message: "logprobs is not supported for reasoning models"
+        });
+      }
+      if (baseArgs.top_logprobs != null) {
+        baseArgs.top_logprobs = undefined;
+        warnings.push({
+          type: "other",
+          message: "topLogprobs is not supported for reasoning models"
+        });
+      }
+      if (baseArgs.max_tokens != null) {
+        if (baseArgs.max_completion_tokens == null) {
+          baseArgs.max_completion_tokens = baseArgs.max_tokens;
+        }
+        baseArgs.max_tokens = undefined;
+      }
+    } else if (this.modelId.startsWith("gpt-4o-search-preview") || this.modelId.startsWith("gpt-4o-mini-search-preview")) {
+      if (baseArgs.temperature != null) {
+        baseArgs.temperature = undefined;
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "temperature",
+          details: "temperature is not supported for the search preview models and has been removed."
+        });
+      }
+    }
+    if (openaiOptions.serviceTier === "flex" && !supportsFlexProcessing3(this.modelId)) {
+      warnings.push({
+        type: "unsupported-setting",
+        setting: "serviceTier",
+        details: "flex processing is only available for o3 and o4-mini models"
+      });
+      baseArgs.service_tier = undefined;
+    }
+    if (openaiOptions.serviceTier === "priority" && !supportsPriorityProcessing3(this.modelId)) {
+      warnings.push({
+        type: "unsupported-setting",
+        setting: "serviceTier",
+        details: "priority processing is only available for supported models (GPT-4, o3, o4-mini) and requires Enterprise access"
+      });
+      baseArgs.service_tier = undefined;
+    }
+    const {
+      tools: openaiTools2,
+      toolChoice: openaiToolChoice,
+      toolWarnings
+    } = prepareTools4({
+      tools,
+      toolChoice,
+      structuredOutputs,
+      strictJsonSchema
+    });
+    return {
+      args: {
+        ...baseArgs,
+        tools: openaiTools2,
+        tool_choice: openaiToolChoice
+      },
+      warnings: [...warnings, ...toolWarnings]
+    };
+  }
+  async doGenerate(options) {
+    var _a15, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n;
+    const { args: body, warnings } = await this.getArgs(options);
+    const {
+      responseHeaders,
+      value: response,
+      rawValue: rawResponse
+    } = await postJsonToApi({
+      url: this.config.url({
+        path: "/chat/completions",
+        modelId: this.modelId
+      }),
+      headers: combineHeaders(this.config.headers(), options.headers),
+      body,
+      failedResponseHandler: openaiFailedResponseHandler2,
+      successfulResponseHandler: createJsonResponseHandler(openaiChatResponseSchema2),
+      abortSignal: options.abortSignal,
+      fetch: this.config.fetch
+    });
+    const choice = response.choices[0];
+    const content = [];
+    const text = choice.message.content;
+    if (text != null && text.length > 0) {
+      content.push({ type: "text", text });
+    }
+    for (const toolCall of (_a15 = choice.message.tool_calls) != null ? _a15 : []) {
+      content.push({
+        type: "tool-call",
+        toolCallId: (_b = toolCall.id) != null ? _b : generateId(),
+        toolName: toolCall.function.name,
+        input: toolCall.function.arguments
+      });
+    }
+    for (const annotation of (_c = choice.message.annotations) != null ? _c : []) {
+      content.push({
+        type: "source",
+        sourceType: "url",
+        id: generateId(),
+        url: annotation.url,
+        title: annotation.title
+      });
+    }
+    const completionTokenDetails = (_d = response.usage) == null ? undefined : _d.completion_tokens_details;
+    const promptTokenDetails = (_e = response.usage) == null ? undefined : _e.prompt_tokens_details;
+    const providerMetadata = { openai: {} };
+    if ((completionTokenDetails == null ? undefined : completionTokenDetails.accepted_prediction_tokens) != null) {
+      providerMetadata.openai.acceptedPredictionTokens = completionTokenDetails == null ? undefined : completionTokenDetails.accepted_prediction_tokens;
+    }
+    if ((completionTokenDetails == null ? undefined : completionTokenDetails.rejected_prediction_tokens) != null) {
+      providerMetadata.openai.rejectedPredictionTokens = completionTokenDetails == null ? undefined : completionTokenDetails.rejected_prediction_tokens;
+    }
+    if (((_f = choice.logprobs) == null ? undefined : _f.content) != null) {
+      providerMetadata.openai.logprobs = choice.logprobs.content;
+    }
+    return {
+      content,
+      finishReason: mapOpenAIFinishReason2(choice.finish_reason),
+      usage: {
+        inputTokens: (_h = (_g = response.usage) == null ? undefined : _g.prompt_tokens) != null ? _h : undefined,
+        outputTokens: (_j = (_i = response.usage) == null ? undefined : _i.completion_tokens) != null ? _j : undefined,
+        totalTokens: (_l = (_k = response.usage) == null ? undefined : _k.total_tokens) != null ? _l : undefined,
+        reasoningTokens: (_m = completionTokenDetails == null ? undefined : completionTokenDetails.reasoning_tokens) != null ? _m : undefined,
+        cachedInputTokens: (_n = promptTokenDetails == null ? undefined : promptTokenDetails.cached_tokens) != null ? _n : undefined
+      },
+      request: { body },
+      response: {
+        ...getResponseMetadata2(response),
+        headers: responseHeaders,
+        body: rawResponse
+      },
+      warnings,
+      providerMetadata
+    };
+  }
+  async doStream(options) {
+    const { args, warnings } = await this.getArgs(options);
+    const body = {
+      ...args,
+      stream: true,
+      stream_options: {
+        include_usage: true
+      }
+    };
+    const { responseHeaders, value: response } = await postJsonToApi({
+      url: this.config.url({
+        path: "/chat/completions",
+        modelId: this.modelId
+      }),
+      headers: combineHeaders(this.config.headers(), options.headers),
+      body,
+      failedResponseHandler: openaiFailedResponseHandler2,
+      successfulResponseHandler: createEventSourceResponseHandler(openaiChatChunkSchema2),
+      abortSignal: options.abortSignal,
+      fetch: this.config.fetch
+    });
+    const toolCalls = [];
+    let finishReason = "unknown";
+    const usage = {
+      inputTokens: undefined,
+      outputTokens: undefined,
+      totalTokens: undefined
+    };
+    let isFirstChunk = true;
+    let isActiveText = false;
+    const providerMetadata = { openai: {} };
+    return {
+      stream: response.pipeThrough(new TransformStream({
+        start(controller) {
+          controller.enqueue({ type: "stream-start", warnings });
+        },
+        transform(chunk, controller) {
+          var _a15, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x;
+          if (options.includeRawChunks) {
+            controller.enqueue({ type: "raw", rawValue: chunk.rawValue });
+          }
+          if (!chunk.success) {
+            finishReason = "error";
+            controller.enqueue({ type: "error", error: chunk.error });
+            return;
+          }
+          const value = chunk.value;
+          if ("error" in value) {
+            finishReason = "error";
+            controller.enqueue({ type: "error", error: value.error });
+            return;
+          }
+          if (isFirstChunk) {
+            isFirstChunk = false;
+            controller.enqueue({
+              type: "response-metadata",
+              ...getResponseMetadata2(value)
+            });
+          }
+          if (value.usage != null) {
+            usage.inputTokens = (_a15 = value.usage.prompt_tokens) != null ? _a15 : undefined;
+            usage.outputTokens = (_b = value.usage.completion_tokens) != null ? _b : undefined;
+            usage.totalTokens = (_c = value.usage.total_tokens) != null ? _c : undefined;
+            usage.reasoningTokens = (_e = (_d = value.usage.completion_tokens_details) == null ? undefined : _d.reasoning_tokens) != null ? _e : undefined;
+            usage.cachedInputTokens = (_g = (_f = value.usage.prompt_tokens_details) == null ? undefined : _f.cached_tokens) != null ? _g : undefined;
+            if (((_h = value.usage.completion_tokens_details) == null ? undefined : _h.accepted_prediction_tokens) != null) {
+              providerMetadata.openai.acceptedPredictionTokens = (_i = value.usage.completion_tokens_details) == null ? undefined : _i.accepted_prediction_tokens;
+            }
+            if (((_j = value.usage.completion_tokens_details) == null ? undefined : _j.rejected_prediction_tokens) != null) {
+              providerMetadata.openai.rejectedPredictionTokens = (_k = value.usage.completion_tokens_details) == null ? undefined : _k.rejected_prediction_tokens;
+            }
+          }
+          const choice = value.choices[0];
+          if ((choice == null ? undefined : choice.finish_reason) != null) {
+            finishReason = mapOpenAIFinishReason2(choice.finish_reason);
+          }
+          if (((_l = choice == null ? undefined : choice.logprobs) == null ? undefined : _l.content) != null) {
+            providerMetadata.openai.logprobs = choice.logprobs.content;
+          }
+          if ((choice == null ? undefined : choice.delta) == null) {
+            return;
+          }
+          const delta = choice.delta;
+          if (delta.content != null) {
+            if (!isActiveText) {
+              controller.enqueue({ type: "text-start", id: "0" });
+              isActiveText = true;
+            }
+            controller.enqueue({
+              type: "text-delta",
+              id: "0",
+              delta: delta.content
+            });
+          }
+          if (delta.tool_calls != null) {
+            for (const toolCallDelta of delta.tool_calls) {
+              const index = toolCallDelta.index;
+              if (toolCalls[index] == null) {
+                if (toolCallDelta.type !== "function") {
+                  throw new InvalidResponseDataError({
+                    data: toolCallDelta,
+                    message: `Expected 'function' type.`
+                  });
+                }
+                if (toolCallDelta.id == null) {
+                  throw new InvalidResponseDataError({
+                    data: toolCallDelta,
+                    message: `Expected 'id' to be a string.`
+                  });
+                }
+                if (((_m = toolCallDelta.function) == null ? undefined : _m.name) == null) {
+                  throw new InvalidResponseDataError({
+                    data: toolCallDelta,
+                    message: `Expected 'function.name' to be a string.`
+                  });
+                }
+                controller.enqueue({
+                  type: "tool-input-start",
+                  id: toolCallDelta.id,
+                  toolName: toolCallDelta.function.name
+                });
+                toolCalls[index] = {
+                  id: toolCallDelta.id,
+                  type: "function",
+                  function: {
+                    name: toolCallDelta.function.name,
+                    arguments: (_n = toolCallDelta.function.arguments) != null ? _n : ""
+                  },
+                  hasFinished: false
+                };
+                const toolCall2 = toolCalls[index];
+                if (((_o = toolCall2.function) == null ? undefined : _o.name) != null && ((_p = toolCall2.function) == null ? undefined : _p.arguments) != null) {
+                  if (toolCall2.function.arguments.length > 0) {
+                    controller.enqueue({
+                      type: "tool-input-delta",
+                      id: toolCall2.id,
+                      delta: toolCall2.function.arguments
+                    });
+                  }
+                  if (isParsableJson(toolCall2.function.arguments)) {
+                    controller.enqueue({
+                      type: "tool-input-end",
+                      id: toolCall2.id
+                    });
+                    controller.enqueue({
+                      type: "tool-call",
+                      toolCallId: (_q = toolCall2.id) != null ? _q : generateId(),
+                      toolName: toolCall2.function.name,
+                      input: toolCall2.function.arguments
+                    });
+                    toolCall2.hasFinished = true;
+                  }
+                }
+                continue;
+              }
+              const toolCall = toolCalls[index];
+              if (toolCall.hasFinished) {
+                continue;
+              }
+              if (((_r = toolCallDelta.function) == null ? undefined : _r.arguments) != null) {
+                toolCall.function.arguments += (_t = (_s = toolCallDelta.function) == null ? undefined : _s.arguments) != null ? _t : "";
+              }
+              controller.enqueue({
+                type: "tool-input-delta",
+                id: toolCall.id,
+                delta: (_u = toolCallDelta.function.arguments) != null ? _u : ""
+              });
+              if (((_v = toolCall.function) == null ? undefined : _v.name) != null && ((_w = toolCall.function) == null ? undefined : _w.arguments) != null && isParsableJson(toolCall.function.arguments)) {
+                controller.enqueue({
+                  type: "tool-input-end",
+                  id: toolCall.id
+                });
+                controller.enqueue({
+                  type: "tool-call",
+                  toolCallId: (_x = toolCall.id) != null ? _x : generateId(),
+                  toolName: toolCall.function.name,
+                  input: toolCall.function.arguments
+                });
+                toolCall.hasFinished = true;
+              }
+            }
+          }
+          if (delta.annotations != null) {
+            for (const annotation of delta.annotations) {
+              controller.enqueue({
+                type: "source",
+                sourceType: "url",
+                id: generateId(),
+                url: annotation.url,
+                title: annotation.title
+              });
+            }
+          }
+        },
+        flush(controller) {
+          if (isActiveText) {
+            controller.enqueue({ type: "text-end", id: "0" });
+          }
+          controller.enqueue({
+            type: "finish",
+            finishReason,
+            usage,
+            ...providerMetadata != null ? { providerMetadata } : {}
+          });
+        }
+      })),
+      request: { body },
+      response: { headers: responseHeaders }
+    };
+  }
+};
+var openaiTokenUsageSchema2 = exports_external.object({
+  prompt_tokens: exports_external.number().nullish(),
+  completion_tokens: exports_external.number().nullish(),
+  total_tokens: exports_external.number().nullish(),
+  prompt_tokens_details: exports_external.object({
+    cached_tokens: exports_external.number().nullish()
+  }).nullish(),
+  completion_tokens_details: exports_external.object({
+    reasoning_tokens: exports_external.number().nullish(),
+    accepted_prediction_tokens: exports_external.number().nullish(),
+    rejected_prediction_tokens: exports_external.number().nullish()
+  }).nullish()
+}).nullish();
+var openaiChatResponseSchema2 = exports_external.object({
+  id: exports_external.string().nullish(),
+  created: exports_external.number().nullish(),
+  model: exports_external.string().nullish(),
+  choices: exports_external.array(exports_external.object({
+    message: exports_external.object({
+      role: exports_external.literal("assistant").nullish(),
+      content: exports_external.string().nullish(),
+      tool_calls: exports_external.array(exports_external.object({
+        id: exports_external.string().nullish(),
+        type: exports_external.literal("function"),
+        function: exports_external.object({
+          name: exports_external.string(),
+          arguments: exports_external.string()
+        })
+      })).nullish(),
+      annotations: exports_external.array(exports_external.object({
+        type: exports_external.literal("url_citation"),
+        start_index: exports_external.number(),
+        end_index: exports_external.number(),
+        url: exports_external.string(),
+        title: exports_external.string()
+      })).nullish()
+    }),
+    index: exports_external.number(),
+    logprobs: exports_external.object({
+      content: exports_external.array(exports_external.object({
+        token: exports_external.string(),
+        logprob: exports_external.number(),
+        top_logprobs: exports_external.array(exports_external.object({
+          token: exports_external.string(),
+          logprob: exports_external.number()
+        }))
+      })).nullish()
+    }).nullish(),
+    finish_reason: exports_external.string().nullish()
+  })),
+  usage: openaiTokenUsageSchema2
+});
+var openaiChatChunkSchema2 = exports_external.union([
+  exports_external.object({
+    id: exports_external.string().nullish(),
+    created: exports_external.number().nullish(),
+    model: exports_external.string().nullish(),
+    choices: exports_external.array(exports_external.object({
+      delta: exports_external.object({
+        role: exports_external.enum(["assistant"]).nullish(),
+        content: exports_external.string().nullish(),
+        tool_calls: exports_external.array(exports_external.object({
+          index: exports_external.number(),
+          id: exports_external.string().nullish(),
+          type: exports_external.literal("function").nullish(),
+          function: exports_external.object({
+            name: exports_external.string().nullish(),
+            arguments: exports_external.string().nullish()
+          })
+        })).nullish(),
+        annotations: exports_external.array(exports_external.object({
+          type: exports_external.literal("url_citation"),
+          start_index: exports_external.number(),
+          end_index: exports_external.number(),
+          url: exports_external.string(),
+          title: exports_external.string()
+        })).nullish()
+      }).nullish(),
+      logprobs: exports_external.object({
+        content: exports_external.array(exports_external.object({
+          token: exports_external.string(),
+          logprob: exports_external.number(),
+          top_logprobs: exports_external.array(exports_external.object({
+            token: exports_external.string(),
+            logprob: exports_external.number()
+          }))
+        })).nullish()
+      }).nullish(),
+      finish_reason: exports_external.string().nullish(),
+      index: exports_external.number()
+    })),
+    usage: openaiTokenUsageSchema2
+  }),
+  openaiErrorDataSchema2
+]);
+function isReasoningModel2(modelId) {
+  return modelId.startsWith("o");
+}
+function supportsFlexProcessing3(modelId) {
+  return modelId.startsWith("o3") || modelId.startsWith("o4-mini");
+}
+function supportsPriorityProcessing3(modelId) {
+  return modelId.startsWith("gpt-4") || modelId.startsWith("o3") || modelId.startsWith("o4-mini");
+}
+function getSystemMessageMode2(modelId) {
+  var _a15, _b;
+  if (!isReasoningModel2(modelId)) {
+    return "system";
+  }
+  return (_b = (_a15 = reasoningModels2[modelId]) == null ? undefined : _a15.systemMessageMode) != null ? _b : "developer";
+}
+var reasoningModels2 = {
+  "o1-mini": {
+    systemMessageMode: "remove"
+  },
+  "o1-mini-2024-09-12": {
+    systemMessageMode: "remove"
+  },
+  "o1-preview": {
+    systemMessageMode: "remove"
+  },
+  "o1-preview-2024-09-12": {
+    systemMessageMode: "remove"
+  },
+  o3: {
+    systemMessageMode: "developer"
+  },
+  "o3-2025-04-16": {
+    systemMessageMode: "developer"
+  },
+  "o3-mini": {
+    systemMessageMode: "developer"
+  },
+  "o3-mini-2025-01-31": {
+    systemMessageMode: "developer"
+  },
+  "o4-mini": {
+    systemMessageMode: "developer"
+  },
+  "o4-mini-2025-04-16": {
+    systemMessageMode: "developer"
+  }
+};
+function convertToOpenAICompletionPrompt2({
+  prompt,
+  user = "user",
+  assistant = "assistant"
+}) {
+  let text = "";
+  if (prompt[0].role === "system") {
+    text += `${prompt[0].content}
+
+`;
+    prompt = prompt.slice(1);
+  }
+  for (const { role, content } of prompt) {
+    switch (role) {
+      case "system": {
+        throw new InvalidPromptError({
+          message: "Unexpected system message in prompt: ${content}",
+          prompt
+        });
+      }
+      case "user": {
+        const userMessage = content.map((part) => {
+          switch (part.type) {
+            case "text": {
+              return part.text;
+            }
+          }
+        }).filter(Boolean).join("");
+        text += `${user}:
+${userMessage}
+
+`;
+        break;
+      }
+      case "assistant": {
+        const assistantMessage = content.map((part) => {
+          switch (part.type) {
+            case "text": {
+              return part.text;
+            }
+            case "tool-call": {
+              throw new UnsupportedFunctionalityError({
+                functionality: "tool-call messages"
+              });
+            }
+          }
+        }).join("");
+        text += `${assistant}:
+${assistantMessage}
+
+`;
+        break;
+      }
+      case "tool": {
+        throw new UnsupportedFunctionalityError({
+          functionality: "tool messages"
+        });
+      }
+      default: {
+        const _exhaustiveCheck = role;
+        throw new Error(`Unsupported role: ${_exhaustiveCheck}`);
+      }
+    }
+  }
+  text += `${assistant}:
+`;
+  return {
+    prompt: text,
+    stopSequences: [`
+${user}:`]
+  };
+}
+var openaiCompletionProviderOptions2 = exports_external.object({
+  echo: exports_external.boolean().optional(),
+  logitBias: exports_external.record(exports_external.string(), exports_external.number()).optional(),
+  suffix: exports_external.string().optional(),
+  user: exports_external.string().optional(),
+  logprobs: exports_external.union([exports_external.boolean(), exports_external.number()]).optional()
+});
+var OpenAICompletionLanguageModel2 = class {
+  constructor(modelId, config2) {
+    this.specificationVersion = "v2";
+    this.supportedUrls = {};
+    this.modelId = modelId;
+    this.config = config2;
+  }
+  get providerOptionsName() {
+    return this.config.provider.split(".")[0].trim();
+  }
+  get provider() {
+    return this.config.provider;
+  }
+  async getArgs({
+    prompt,
+    maxOutputTokens,
+    temperature,
+    topP,
+    topK,
+    frequencyPenalty,
+    presencePenalty,
+    stopSequences: userStopSequences,
+    responseFormat,
+    tools,
+    toolChoice,
+    seed,
+    providerOptions
+  }) {
+    const warnings = [];
+    const openaiOptions = {
+      ...await parseProviderOptions({
+        provider: "openai",
+        providerOptions,
+        schema: openaiCompletionProviderOptions2
+      }),
+      ...await parseProviderOptions({
+        provider: this.providerOptionsName,
+        providerOptions,
+        schema: openaiCompletionProviderOptions2
+      })
+    };
+    if (topK != null) {
+      warnings.push({ type: "unsupported-setting", setting: "topK" });
+    }
+    if (tools == null ? undefined : tools.length) {
+      warnings.push({ type: "unsupported-setting", setting: "tools" });
+    }
+    if (toolChoice != null) {
+      warnings.push({ type: "unsupported-setting", setting: "toolChoice" });
+    }
+    if (responseFormat != null && responseFormat.type !== "text") {
+      warnings.push({
+        type: "unsupported-setting",
+        setting: "responseFormat",
+        details: "JSON response format is not supported."
+      });
+    }
+    const { prompt: completionPrompt, stopSequences } = convertToOpenAICompletionPrompt2({ prompt });
+    const stop = [...stopSequences != null ? stopSequences : [], ...userStopSequences != null ? userStopSequences : []];
+    return {
+      args: {
+        model: this.modelId,
+        echo: openaiOptions.echo,
+        logit_bias: openaiOptions.logitBias,
+        logprobs: (openaiOptions == null ? undefined : openaiOptions.logprobs) === true ? 0 : (openaiOptions == null ? undefined : openaiOptions.logprobs) === false ? undefined : openaiOptions == null ? undefined : openaiOptions.logprobs,
+        suffix: openaiOptions.suffix,
+        user: openaiOptions.user,
+        max_tokens: maxOutputTokens,
+        temperature,
+        top_p: topP,
+        frequency_penalty: frequencyPenalty,
+        presence_penalty: presencePenalty,
+        seed,
+        prompt: completionPrompt,
+        stop: stop.length > 0 ? stop : undefined
+      },
+      warnings
+    };
+  }
+  async doGenerate(options) {
+    var _a15, _b, _c;
+    const { args, warnings } = await this.getArgs(options);
+    const {
+      responseHeaders,
+      value: response,
+      rawValue: rawResponse
+    } = await postJsonToApi({
+      url: this.config.url({
+        path: "/completions",
+        modelId: this.modelId
+      }),
+      headers: combineHeaders(this.config.headers(), options.headers),
+      body: args,
+      failedResponseHandler: openaiFailedResponseHandler2,
+      successfulResponseHandler: createJsonResponseHandler(openaiCompletionResponseSchema2),
+      abortSignal: options.abortSignal,
+      fetch: this.config.fetch
+    });
+    const choice = response.choices[0];
+    const providerMetadata = { openai: {} };
+    if (choice.logprobs != null) {
+      providerMetadata.openai.logprobs = choice.logprobs;
+    }
+    return {
+      content: [{ type: "text", text: choice.text }],
+      usage: {
+        inputTokens: (_a15 = response.usage) == null ? undefined : _a15.prompt_tokens,
+        outputTokens: (_b = response.usage) == null ? undefined : _b.completion_tokens,
+        totalTokens: (_c = response.usage) == null ? undefined : _c.total_tokens
+      },
+      finishReason: mapOpenAIFinishReason2(choice.finish_reason),
+      request: { body: args },
+      response: {
+        ...getResponseMetadata2(response),
+        headers: responseHeaders,
+        body: rawResponse
+      },
+      providerMetadata,
+      warnings
+    };
+  }
+  async doStream(options) {
+    const { args, warnings } = await this.getArgs(options);
+    const body = {
+      ...args,
+      stream: true,
+      stream_options: {
+        include_usage: true
+      }
+    };
+    const { responseHeaders, value: response } = await postJsonToApi({
+      url: this.config.url({
+        path: "/completions",
+        modelId: this.modelId
+      }),
+      headers: combineHeaders(this.config.headers(), options.headers),
+      body,
+      failedResponseHandler: openaiFailedResponseHandler2,
+      successfulResponseHandler: createEventSourceResponseHandler(openaiCompletionChunkSchema2),
+      abortSignal: options.abortSignal,
+      fetch: this.config.fetch
+    });
+    let finishReason = "unknown";
+    const providerMetadata = { openai: {} };
+    const usage = {
+      inputTokens: undefined,
+      outputTokens: undefined,
+      totalTokens: undefined
+    };
+    let isFirstChunk = true;
+    return {
+      stream: response.pipeThrough(new TransformStream({
+        start(controller) {
+          controller.enqueue({ type: "stream-start", warnings });
+        },
+        transform(chunk, controller) {
+          if (options.includeRawChunks) {
+            controller.enqueue({ type: "raw", rawValue: chunk.rawValue });
+          }
+          if (!chunk.success) {
+            finishReason = "error";
+            controller.enqueue({ type: "error", error: chunk.error });
+            return;
+          }
+          const value = chunk.value;
+          if ("error" in value) {
+            finishReason = "error";
+            controller.enqueue({ type: "error", error: value.error });
+            return;
+          }
+          if (isFirstChunk) {
+            isFirstChunk = false;
+            controller.enqueue({
+              type: "response-metadata",
+              ...getResponseMetadata2(value)
+            });
+            controller.enqueue({ type: "text-start", id: "0" });
+          }
+          if (value.usage != null) {
+            usage.inputTokens = value.usage.prompt_tokens;
+            usage.outputTokens = value.usage.completion_tokens;
+            usage.totalTokens = value.usage.total_tokens;
+          }
+          const choice = value.choices[0];
+          if ((choice == null ? undefined : choice.finish_reason) != null) {
+            finishReason = mapOpenAIFinishReason2(choice.finish_reason);
+          }
+          if ((choice == null ? undefined : choice.logprobs) != null) {
+            providerMetadata.openai.logprobs = choice.logprobs;
+          }
+          if ((choice == null ? undefined : choice.text) != null && choice.text.length > 0) {
+            controller.enqueue({
+              type: "text-delta",
+              id: "0",
+              delta: choice.text
+            });
+          }
+        },
+        flush(controller) {
+          if (!isFirstChunk) {
+            controller.enqueue({ type: "text-end", id: "0" });
+          }
+          controller.enqueue({
+            type: "finish",
+            finishReason,
+            providerMetadata,
+            usage
+          });
+        }
+      })),
+      request: { body },
+      response: { headers: responseHeaders }
+    };
+  }
+};
+var usageSchema3 = exports_external.object({
+  prompt_tokens: exports_external.number(),
+  completion_tokens: exports_external.number(),
+  total_tokens: exports_external.number()
+});
+var openaiCompletionResponseSchema2 = exports_external.object({
+  id: exports_external.string().nullish(),
+  created: exports_external.number().nullish(),
+  model: exports_external.string().nullish(),
+  choices: exports_external.array(exports_external.object({
+    text: exports_external.string(),
+    finish_reason: exports_external.string(),
+    logprobs: exports_external.object({
+      tokens: exports_external.array(exports_external.string()),
+      token_logprobs: exports_external.array(exports_external.number()),
+      top_logprobs: exports_external.array(exports_external.record(exports_external.string(), exports_external.number())).nullish()
+    }).nullish()
+  })),
+  usage: usageSchema3.nullish()
+});
+var openaiCompletionChunkSchema2 = exports_external.union([
+  exports_external.object({
+    id: exports_external.string().nullish(),
+    created: exports_external.number().nullish(),
+    model: exports_external.string().nullish(),
+    choices: exports_external.array(exports_external.object({
+      text: exports_external.string(),
+      finish_reason: exports_external.string().nullish(),
+      index: exports_external.number(),
+      logprobs: exports_external.object({
+        tokens: exports_external.array(exports_external.string()),
+        token_logprobs: exports_external.array(exports_external.number()),
+        top_logprobs: exports_external.array(exports_external.record(exports_external.string(), exports_external.number())).nullish()
+      }).nullish()
+    })),
+    usage: usageSchema3.nullish()
+  }),
+  openaiErrorDataSchema2
+]);
+var openaiEmbeddingProviderOptions2 = exports_external.object({
+  dimensions: exports_external.number().optional(),
+  user: exports_external.string().optional()
+});
+var OpenAIEmbeddingModel2 = class {
+  constructor(modelId, config2) {
+    this.specificationVersion = "v2";
+    this.maxEmbeddingsPerCall = 2048;
+    this.supportsParallelCalls = true;
+    this.modelId = modelId;
+    this.config = config2;
+  }
+  get provider() {
+    return this.config.provider;
+  }
+  async doEmbed({
+    values,
+    headers,
+    abortSignal,
+    providerOptions
+  }) {
+    var _a15;
+    if (values.length > this.maxEmbeddingsPerCall) {
+      throw new TooManyEmbeddingValuesForCallError({
+        provider: this.provider,
+        modelId: this.modelId,
+        maxEmbeddingsPerCall: this.maxEmbeddingsPerCall,
+        values
+      });
+    }
+    const openaiOptions = (_a15 = await parseProviderOptions({
+      provider: "openai",
+      providerOptions,
+      schema: openaiEmbeddingProviderOptions2
+    })) != null ? _a15 : {};
+    const {
+      responseHeaders,
+      value: response,
+      rawValue
+    } = await postJsonToApi({
+      url: this.config.url({
+        path: "/embeddings",
+        modelId: this.modelId
+      }),
+      headers: combineHeaders(this.config.headers(), headers),
+      body: {
+        model: this.modelId,
+        input: values,
+        encoding_format: "float",
+        dimensions: openaiOptions.dimensions,
+        user: openaiOptions.user
+      },
+      failedResponseHandler: openaiFailedResponseHandler2,
+      successfulResponseHandler: createJsonResponseHandler(openaiTextEmbeddingResponseSchema2),
+      abortSignal,
+      fetch: this.config.fetch
+    });
+    return {
+      embeddings: response.data.map((item) => item.embedding),
+      usage: response.usage ? { tokens: response.usage.prompt_tokens } : undefined,
+      response: { headers: responseHeaders, body: rawValue }
+    };
+  }
+};
+var openaiTextEmbeddingResponseSchema2 = exports_external.object({
+  data: exports_external.array(exports_external.object({ embedding: exports_external.array(exports_external.number()) })),
+  usage: exports_external.object({ prompt_tokens: exports_external.number() }).nullish()
+});
+var modelMaxImagesPerCall2 = {
+  "dall-e-3": 1,
+  "dall-e-2": 10,
+  "gpt-image-1": 10
+};
+var hasDefaultResponseFormat2 = /* @__PURE__ */ new Set(["gpt-image-1"]);
+var OpenAIImageModel2 = class {
+  constructor(modelId, config2) {
+    this.modelId = modelId;
+    this.config = config2;
+    this.specificationVersion = "v2";
+  }
+  get maxImagesPerCall() {
+    var _a15;
+    return (_a15 = modelMaxImagesPerCall2[this.modelId]) != null ? _a15 : 1;
+  }
+  get provider() {
+    return this.config.provider;
+  }
+  async doGenerate({
+    prompt,
+    n,
+    size,
+    aspectRatio,
+    seed,
+    providerOptions,
+    headers,
+    abortSignal
+  }) {
+    var _a15, _b, _c, _d;
+    const warnings = [];
+    if (aspectRatio != null) {
+      warnings.push({
+        type: "unsupported-setting",
+        setting: "aspectRatio",
+        details: "This model does not support aspect ratio. Use `size` instead."
+      });
+    }
+    if (seed != null) {
+      warnings.push({ type: "unsupported-setting", setting: "seed" });
+    }
+    const currentDate = (_c = (_b = (_a15 = this.config._internal) == null ? undefined : _a15.currentDate) == null ? undefined : _b.call(_a15)) != null ? _c : /* @__PURE__ */ new Date;
+    const { value: response, responseHeaders } = await postJsonToApi({
+      url: this.config.url({
+        path: "/images/generations",
+        modelId: this.modelId
+      }),
+      headers: combineHeaders(this.config.headers(), headers),
+      body: {
+        model: this.modelId,
+        prompt,
+        n,
+        size,
+        ...(_d = providerOptions.openai) != null ? _d : {},
+        ...!hasDefaultResponseFormat2.has(this.modelId) ? { response_format: "b64_json" } : {}
+      },
+      failedResponseHandler: openaiFailedResponseHandler2,
+      successfulResponseHandler: createJsonResponseHandler(openaiImageResponseSchema2),
+      abortSignal,
+      fetch: this.config.fetch
+    });
+    return {
+      images: response.data.map((item) => item.b64_json),
+      warnings,
+      response: {
+        timestamp: currentDate,
+        modelId: this.modelId,
+        headers: responseHeaders
+      },
+      providerMetadata: {
+        openai: {
+          images: response.data.map((item) => item.revised_prompt ? {
+            revisedPrompt: item.revised_prompt
+          } : null)
+        }
+      }
+    };
+  }
+};
+var openaiImageResponseSchema2 = exports_external.object({
+  data: exports_external.array(exports_external.object({ b64_json: exports_external.string(), revised_prompt: exports_external.string().optional() }))
+});
+var openaiTools2 = {
+  fileSearch: fileSearch2,
+  webSearchPreview: webSearchPreview2
+};
+var openAITranscriptionProviderOptions2 = exports_external.object({
+  include: exports_external.array(exports_external.string()).optional(),
+  language: exports_external.string().optional(),
+  prompt: exports_external.string().optional(),
+  temperature: exports_external.number().min(0).max(1).default(0).optional(),
+  timestampGranularities: exports_external.array(exports_external.enum(["word", "segment"])).default(["segment"]).optional()
+});
+var languageMap2 = {
+  afrikaans: "af",
+  arabic: "ar",
+  armenian: "hy",
+  azerbaijani: "az",
+  belarusian: "be",
+  bosnian: "bs",
+  bulgarian: "bg",
+  catalan: "ca",
+  chinese: "zh",
+  croatian: "hr",
+  czech: "cs",
+  danish: "da",
+  dutch: "nl",
+  english: "en",
+  estonian: "et",
+  finnish: "fi",
+  french: "fr",
+  galician: "gl",
+  german: "de",
+  greek: "el",
+  hebrew: "he",
+  hindi: "hi",
+  hungarian: "hu",
+  icelandic: "is",
+  indonesian: "id",
+  italian: "it",
+  japanese: "ja",
+  kannada: "kn",
+  kazakh: "kk",
+  korean: "ko",
+  latvian: "lv",
+  lithuanian: "lt",
+  macedonian: "mk",
+  malay: "ms",
+  marathi: "mr",
+  maori: "mi",
+  nepali: "ne",
+  norwegian: "no",
+  persian: "fa",
+  polish: "pl",
+  portuguese: "pt",
+  romanian: "ro",
+  russian: "ru",
+  serbian: "sr",
+  slovak: "sk",
+  slovenian: "sl",
+  spanish: "es",
+  swahili: "sw",
+  swedish: "sv",
+  tagalog: "tl",
+  tamil: "ta",
+  thai: "th",
+  turkish: "tr",
+  ukrainian: "uk",
+  urdu: "ur",
+  vietnamese: "vi",
+  welsh: "cy"
+};
+var OpenAITranscriptionModel2 = class {
+  constructor(modelId, config2) {
+    this.modelId = modelId;
+    this.config = config2;
+    this.specificationVersion = "v2";
+  }
+  get provider() {
+    return this.config.provider;
+  }
+  async getArgs({
+    audio,
+    mediaType,
+    providerOptions
+  }) {
+    const warnings = [];
+    const openAIOptions = await parseProviderOptions({
+      provider: "openai",
+      providerOptions,
+      schema: openAITranscriptionProviderOptions2
+    });
+    const formData = new FormData;
+    const blob = audio instanceof Uint8Array ? new Blob([audio]) : new Blob([convertBase64ToUint8Array(audio)]);
+    formData.append("model", this.modelId);
+    formData.append("file", new File([blob], "audio", { type: mediaType }));
+    if (openAIOptions) {
+      const transcriptionModelOptions = {
+        include: openAIOptions.include,
+        language: openAIOptions.language,
+        prompt: openAIOptions.prompt,
+        temperature: openAIOptions.temperature,
+        timestamp_granularities: openAIOptions.timestampGranularities
+      };
+      for (const [key, value] of Object.entries(transcriptionModelOptions)) {
+        if (value != null) {
+          formData.append(key, String(value));
+        }
+      }
+    }
+    return {
+      formData,
+      warnings
+    };
+  }
+  async doGenerate(options) {
+    var _a15, _b, _c, _d, _e, _f;
+    const currentDate = (_c = (_b = (_a15 = this.config._internal) == null ? undefined : _a15.currentDate) == null ? undefined : _b.call(_a15)) != null ? _c : /* @__PURE__ */ new Date;
+    const { formData, warnings } = await this.getArgs(options);
+    const {
+      value: response,
+      responseHeaders,
+      rawValue: rawResponse
+    } = await postFormDataToApi({
+      url: this.config.url({
+        path: "/audio/transcriptions",
+        modelId: this.modelId
+      }),
+      headers: combineHeaders(this.config.headers(), options.headers),
+      formData,
+      failedResponseHandler: openaiFailedResponseHandler2,
+      successfulResponseHandler: createJsonResponseHandler(openaiTranscriptionResponseSchema2),
+      abortSignal: options.abortSignal,
+      fetch: this.config.fetch
+    });
+    const language = response.language != null && response.language in languageMap2 ? languageMap2[response.language] : undefined;
+    return {
+      text: response.text,
+      segments: (_e = (_d = response.words) == null ? undefined : _d.map((word) => ({
+        text: word.word,
+        startSecond: word.start,
+        endSecond: word.end
+      }))) != null ? _e : [],
+      language,
+      durationInSeconds: (_f = response.duration) != null ? _f : undefined,
+      warnings,
+      response: {
+        timestamp: currentDate,
+        modelId: this.modelId,
+        headers: responseHeaders,
+        body: rawResponse
+      }
+    };
+  }
+};
+var openaiTranscriptionResponseSchema2 = exports_external.object({
+  text: exports_external.string(),
+  language: exports_external.string().nullish(),
+  duration: exports_external.number().nullish(),
+  words: exports_external.array(exports_external.object({
+    word: exports_external.string(),
+    start: exports_external.number(),
+    end: exports_external.number()
+  })).nullish()
+});
+async function convertToOpenAIResponsesMessages2({
+  prompt,
+  systemMessageMode
+}) {
+  var _a15, _b, _c, _d, _e, _f;
+  const messages = [];
+  const warnings = [];
+  for (const { role, content } of prompt) {
+    switch (role) {
+      case "system": {
+        switch (systemMessageMode) {
+          case "system": {
+            messages.push({ role: "system", content });
+            break;
+          }
+          case "developer": {
+            messages.push({ role: "developer", content });
+            break;
+          }
+          case "remove": {
+            warnings.push({
+              type: "other",
+              message: "system messages are removed for this model"
+            });
+            break;
+          }
+          default: {
+            const _exhaustiveCheck = systemMessageMode;
+            throw new Error(`Unsupported system message mode: ${_exhaustiveCheck}`);
+          }
+        }
+        break;
+      }
+      case "user": {
+        messages.push({
+          role: "user",
+          content: content.map((part, index) => {
+            var _a22, _b2, _c2;
+            switch (part.type) {
+              case "text": {
+                return { type: "input_text", text: part.text };
+              }
+              case "file": {
+                if (part.mediaType.startsWith("image/")) {
+                  const mediaType = part.mediaType === "image/*" ? "image/jpeg" : part.mediaType;
+                  return {
+                    type: "input_image",
+                    image_url: part.data instanceof URL ? part.data.toString() : `data:${mediaType};base64,${part.data}`,
+                    detail: (_b2 = (_a22 = part.providerOptions) == null ? undefined : _a22.openai) == null ? undefined : _b2.imageDetail
+                  };
+                } else if (part.mediaType === "application/pdf") {
+                  if (part.data instanceof URL) {
+                    throw new UnsupportedFunctionalityError({
+                      functionality: "PDF file parts with URLs"
+                    });
+                  }
+                  return {
+                    type: "input_file",
+                    filename: (_c2 = part.filename) != null ? _c2 : `part-${index}.pdf`,
+                    file_data: `data:application/pdf;base64,${part.data}`
+                  };
+                } else {
+                  throw new UnsupportedFunctionalityError({
+                    functionality: `file part media type ${part.mediaType}`
+                  });
+                }
+              }
+            }
+          })
+        });
+        break;
+      }
+      case "assistant": {
+        const reasoningMessages = {};
+        for (const part of content) {
+          switch (part.type) {
+            case "text": {
+              messages.push({
+                role: "assistant",
+                content: [{ type: "output_text", text: part.text }],
+                id: (_c = (_b = (_a15 = part.providerOptions) == null ? undefined : _a15.openai) == null ? undefined : _b.itemId) != null ? _c : undefined
+              });
+              break;
+            }
+            case "tool-call": {
+              if (part.providerExecuted) {
+                break;
+              }
+              messages.push({
+                type: "function_call",
+                call_id: part.toolCallId,
+                name: part.toolName,
+                arguments: JSON.stringify(part.input),
+                id: (_f = (_e = (_d = part.providerOptions) == null ? undefined : _d.openai) == null ? undefined : _e.itemId) != null ? _f : undefined
+              });
+              break;
+            }
+            case "tool-result": {
+              warnings.push({
+                type: "other",
+                message: `tool result parts in assistant messages are not supported for OpenAI responses`
+              });
+              break;
+            }
+            case "reasoning": {
+              const providerOptions = await parseProviderOptions({
+                provider: "openai",
+                providerOptions: part.providerOptions,
+                schema: openaiResponsesReasoningProviderOptionsSchema2
+              });
+              const reasoningId = providerOptions == null ? undefined : providerOptions.itemId;
+              if (reasoningId != null) {
+                const existingReasoningMessage = reasoningMessages[reasoningId];
+                const summaryParts = [];
+                if (part.text.length > 0) {
+                  summaryParts.push({ type: "summary_text", text: part.text });
+                } else if (existingReasoningMessage !== undefined) {
+                  warnings.push({
+                    type: "other",
+                    message: `Cannot append empty reasoning part to existing reasoning sequence. Skipping reasoning part: ${JSON.stringify(part)}.`
+                  });
+                }
+                if (existingReasoningMessage === undefined) {
+                  reasoningMessages[reasoningId] = {
+                    type: "reasoning",
+                    id: reasoningId,
+                    encrypted_content: providerOptions == null ? undefined : providerOptions.reasoningEncryptedContent,
+                    summary: summaryParts
+                  };
+                  messages.push(reasoningMessages[reasoningId]);
+                } else {
+                  existingReasoningMessage.summary.push(...summaryParts);
+                }
+              } else {
+                warnings.push({
+                  type: "other",
+                  message: `Non-OpenAI reasoning parts are not supported. Skipping reasoning part: ${JSON.stringify(part)}.`
+                });
+              }
+              break;
+            }
+          }
+        }
+        break;
+      }
+      case "tool": {
+        for (const part of content) {
+          const output = part.output;
+          let contentValue;
+          switch (output.type) {
+            case "text":
+            case "error-text":
+              contentValue = output.value;
+              break;
+            case "content":
+            case "json":
+            case "error-json":
+              contentValue = JSON.stringify(output.value);
+              break;
+          }
+          messages.push({
+            type: "function_call_output",
+            call_id: part.toolCallId,
+            output: contentValue
+          });
+        }
+        break;
+      }
+      default: {
+        const _exhaustiveCheck = role;
+        throw new Error(`Unsupported role: ${_exhaustiveCheck}`);
+      }
+    }
+  }
+  return { messages, warnings };
+}
+var openaiResponsesReasoningProviderOptionsSchema2 = exports_external.object({
+  itemId: exports_external.string().nullish(),
+  reasoningEncryptedContent: exports_external.string().nullish()
+});
+function mapOpenAIResponseFinishReason2({
+  finishReason,
+  hasToolCalls
+}) {
+  switch (finishReason) {
+    case undefined:
+    case null:
+      return hasToolCalls ? "tool-calls" : "stop";
+    case "max_output_tokens":
+      return "length";
+    case "content_filter":
+      return "content-filter";
+    default:
+      return hasToolCalls ? "tool-calls" : "unknown";
+  }
+}
+function prepareResponsesTools2({
+  tools,
+  toolChoice,
+  strictJsonSchema
+}) {
+  tools = (tools == null ? undefined : tools.length) ? tools : undefined;
+  const toolWarnings = [];
+  if (tools == null) {
+    return { tools: undefined, toolChoice: undefined, toolWarnings };
+  }
+  const openaiTools22 = [];
+  for (const tool2 of tools) {
+    switch (tool2.type) {
+      case "function":
+        openaiTools22.push({
+          type: "function",
+          name: tool2.name,
+          description: tool2.description,
+          parameters: tool2.inputSchema,
+          strict: strictJsonSchema
+        });
+        break;
+      case "provider-defined":
+        switch (tool2.id) {
+          case "openai.file_search": {
+            const args = fileSearchArgsSchema2.parse(tool2.args);
+            openaiTools22.push({
+              type: "file_search",
+              vector_store_ids: args.vectorStoreIds,
+              max_num_results: args.maxNumResults,
+              ranking_options: args.ranking ? { ranker: args.ranking.ranker } : undefined,
+              filters: args.filters
+            });
+            break;
+          }
+          case "openai.web_search_preview":
+            openaiTools22.push({
+              type: "web_search_preview",
+              search_context_size: tool2.args.searchContextSize,
+              user_location: tool2.args.userLocation
+            });
+            break;
+          default:
+            toolWarnings.push({ type: "unsupported-tool", tool: tool2 });
+            break;
+        }
+        break;
+      default:
+        toolWarnings.push({ type: "unsupported-tool", tool: tool2 });
+        break;
+    }
+  }
+  if (toolChoice == null) {
+    return { tools: openaiTools22, toolChoice: undefined, toolWarnings };
+  }
+  const type = toolChoice.type;
+  switch (type) {
+    case "auto":
+    case "none":
+    case "required":
+      return { tools: openaiTools22, toolChoice: type, toolWarnings };
+    case "tool":
+      return {
+        tools: openaiTools22,
+        toolChoice: toolChoice.toolName === "file_search" ? { type: "file_search" } : toolChoice.toolName === "web_search_preview" ? { type: "web_search_preview" } : { type: "function", name: toolChoice.toolName },
+        toolWarnings
+      };
+    default: {
+      const _exhaustiveCheck = type;
+      throw new UnsupportedFunctionalityError({
+        functionality: `tool choice type: ${_exhaustiveCheck}`
+      });
+    }
+  }
+}
+var OpenAIResponsesLanguageModel2 = class {
+  constructor(modelId, config2) {
+    this.specificationVersion = "v2";
+    this.supportedUrls = {
+      "image/*": [/^https?:\/\/.*$/]
+    };
+    this.modelId = modelId;
+    this.config = config2;
+  }
+  get provider() {
+    return this.config.provider;
+  }
+  async getArgs({
+    maxOutputTokens,
+    temperature,
+    stopSequences,
+    topP,
+    topK,
+    presencePenalty,
+    frequencyPenalty,
+    seed,
+    prompt,
+    providerOptions,
+    tools,
+    toolChoice,
+    responseFormat
+  }) {
+    var _a15, _b;
+    const warnings = [];
+    const modelConfig = getResponsesModelConfig2(this.modelId);
+    if (topK != null) {
+      warnings.push({ type: "unsupported-setting", setting: "topK" });
+    }
+    if (seed != null) {
+      warnings.push({ type: "unsupported-setting", setting: "seed" });
+    }
+    if (presencePenalty != null) {
+      warnings.push({
+        type: "unsupported-setting",
+        setting: "presencePenalty"
+      });
+    }
+    if (frequencyPenalty != null) {
+      warnings.push({
+        type: "unsupported-setting",
+        setting: "frequencyPenalty"
+      });
+    }
+    if (stopSequences != null) {
+      warnings.push({ type: "unsupported-setting", setting: "stopSequences" });
+    }
+    const { messages, warnings: messageWarnings } = await convertToOpenAIResponsesMessages2({
+      prompt,
+      systemMessageMode: modelConfig.systemMessageMode
+    });
+    warnings.push(...messageWarnings);
+    const openaiOptions = await parseProviderOptions({
+      provider: "openai",
+      providerOptions,
+      schema: openaiResponsesProviderOptionsSchema2
+    });
+    const strictJsonSchema = (_a15 = openaiOptions == null ? undefined : openaiOptions.strictJsonSchema) != null ? _a15 : false;
+    const baseArgs = {
+      model: this.modelId,
+      input: messages,
+      temperature,
+      top_p: topP,
+      max_output_tokens: maxOutputTokens,
+      ...(responseFormat == null ? undefined : responseFormat.type) === "json" && {
+        text: {
+          format: responseFormat.schema != null ? {
+            type: "json_schema",
+            strict: strictJsonSchema,
+            name: (_b = responseFormat.name) != null ? _b : "response",
+            description: responseFormat.description,
+            schema: responseFormat.schema
+          } : { type: "json_object" }
+        }
+      },
+      metadata: openaiOptions == null ? undefined : openaiOptions.metadata,
+      parallel_tool_calls: openaiOptions == null ? undefined : openaiOptions.parallelToolCalls,
+      previous_response_id: openaiOptions == null ? undefined : openaiOptions.previousResponseId,
+      store: openaiOptions == null ? undefined : openaiOptions.store,
+      user: openaiOptions == null ? undefined : openaiOptions.user,
+      instructions: openaiOptions == null ? undefined : openaiOptions.instructions,
+      service_tier: openaiOptions == null ? undefined : openaiOptions.serviceTier,
+      include: openaiOptions == null ? undefined : openaiOptions.include,
+      ...modelConfig.isReasoningModel && ((openaiOptions == null ? undefined : openaiOptions.reasoningEffort) != null || (openaiOptions == null ? undefined : openaiOptions.reasoningSummary) != null) && {
+        reasoning: {
+          ...(openaiOptions == null ? undefined : openaiOptions.reasoningEffort) != null && {
+            effort: openaiOptions.reasoningEffort
+          },
+          ...(openaiOptions == null ? undefined : openaiOptions.reasoningSummary) != null && {
+            summary: openaiOptions.reasoningSummary
+          }
+        }
+      },
+      ...modelConfig.requiredAutoTruncation && {
+        truncation: "auto"
+      }
+    };
+    if (modelConfig.isReasoningModel) {
+      if (baseArgs.temperature != null) {
+        baseArgs.temperature = undefined;
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "temperature",
+          details: "temperature is not supported for reasoning models"
+        });
+      }
+      if (baseArgs.top_p != null) {
+        baseArgs.top_p = undefined;
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "topP",
+          details: "topP is not supported for reasoning models"
+        });
+      }
+    } else {
+      if ((openaiOptions == null ? undefined : openaiOptions.reasoningEffort) != null) {
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "reasoningEffort",
+          details: "reasoningEffort is not supported for non-reasoning models"
+        });
+      }
+      if ((openaiOptions == null ? undefined : openaiOptions.reasoningSummary) != null) {
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "reasoningSummary",
+          details: "reasoningSummary is not supported for non-reasoning models"
+        });
+      }
+    }
+    if ((openaiOptions == null ? undefined : openaiOptions.serviceTier) === "flex" && !supportsFlexProcessing22(this.modelId)) {
+      warnings.push({
+        type: "unsupported-setting",
+        setting: "serviceTier",
+        details: "flex processing is only available for o3 and o4-mini models"
+      });
+      delete baseArgs.service_tier;
+    }
+    if ((openaiOptions == null ? undefined : openaiOptions.serviceTier) === "priority" && !supportsPriorityProcessing22(this.modelId)) {
+      warnings.push({
+        type: "unsupported-setting",
+        setting: "serviceTier",
+        details: "priority processing is only available for supported models (GPT-4, o3, o4-mini) and requires Enterprise access"
+      });
+      delete baseArgs.service_tier;
+    }
+    const {
+      tools: openaiTools22,
+      toolChoice: openaiToolChoice,
+      toolWarnings
+    } = prepareResponsesTools2({
+      tools,
+      toolChoice,
+      strictJsonSchema
+    });
+    return {
+      args: {
+        ...baseArgs,
+        tools: openaiTools22,
+        tool_choice: openaiToolChoice
+      },
+      warnings: [...warnings, ...toolWarnings]
+    };
+  }
+  async doGenerate(options) {
+    var _a15, _b, _c, _d, _e, _f, _g, _h, _i;
+    const { args: body, warnings } = await this.getArgs(options);
+    const url2 = this.config.url({
+      path: "/responses",
+      modelId: this.modelId
+    });
+    const {
+      responseHeaders,
+      value: response,
+      rawValue: rawResponse
+    } = await postJsonToApi({
+      url: url2,
+      headers: combineHeaders(this.config.headers(), options.headers),
+      body,
+      failedResponseHandler: openaiFailedResponseHandler2,
+      successfulResponseHandler: createJsonResponseHandler(exports_external.object({
+        id: exports_external.string(),
+        created_at: exports_external.number(),
+        error: exports_external.object({
+          code: exports_external.string(),
+          message: exports_external.string()
+        }).nullish(),
+        model: exports_external.string(),
+        output: exports_external.array(exports_external.discriminatedUnion("type", [
+          exports_external.object({
+            type: exports_external.literal("message"),
+            role: exports_external.literal("assistant"),
+            id: exports_external.string(),
+            content: exports_external.array(exports_external.object({
+              type: exports_external.literal("output_text"),
+              text: exports_external.string(),
+              annotations: exports_external.array(exports_external.object({
+                type: exports_external.literal("url_citation"),
+                start_index: exports_external.number(),
+                end_index: exports_external.number(),
+                url: exports_external.string(),
+                title: exports_external.string()
+              }))
+            }))
+          }),
+          exports_external.object({
+            type: exports_external.literal("function_call"),
+            call_id: exports_external.string(),
+            name: exports_external.string(),
+            arguments: exports_external.string(),
+            id: exports_external.string()
+          }),
+          exports_external.object({
+            type: exports_external.literal("web_search_call"),
+            id: exports_external.string(),
+            status: exports_external.string().optional()
+          }),
+          exports_external.object({
+            type: exports_external.literal("computer_call"),
+            id: exports_external.string(),
+            status: exports_external.string().optional()
+          }),
+          exports_external.object({
+            type: exports_external.literal("file_search_call"),
+            id: exports_external.string(),
+            status: exports_external.string().optional()
+          }),
+          exports_external.object({
+            type: exports_external.literal("reasoning"),
+            id: exports_external.string(),
+            encrypted_content: exports_external.string().nullish(),
+            summary: exports_external.array(exports_external.object({
+              type: exports_external.literal("summary_text"),
+              text: exports_external.string()
+            }))
+          })
+        ])),
+        incomplete_details: exports_external.object({ reason: exports_external.string() }).nullable(),
+        usage: usageSchema22
+      })),
+      abortSignal: options.abortSignal,
+      fetch: this.config.fetch
+    });
+    if (response.error) {
+      throw new APICallError({
+        message: response.error.message,
+        url: url2,
+        requestBodyValues: body,
+        statusCode: 400,
+        responseHeaders,
+        responseBody: rawResponse,
+        isRetryable: false
+      });
+    }
+    const content = [];
+    for (const part of response.output) {
+      switch (part.type) {
+        case "reasoning": {
+          if (part.summary.length === 0) {
+            part.summary.push({ type: "summary_text", text: "" });
+          }
+          for (const summary of part.summary) {
+            content.push({
+              type: "reasoning",
+              text: summary.text,
+              providerMetadata: {
+                openai: {
+                  itemId: part.id,
+                  reasoningEncryptedContent: (_a15 = part.encrypted_content) != null ? _a15 : null
+                }
+              }
+            });
+          }
+          break;
+        }
+        case "message": {
+          for (const contentPart of part.content) {
+            content.push({
+              type: "text",
+              text: contentPart.text,
+              providerMetadata: {
+                openai: {
+                  itemId: part.id
+                }
+              }
+            });
+            for (const annotation of contentPart.annotations) {
+              content.push({
+                type: "source",
+                sourceType: "url",
+                id: (_d = (_c = (_b = this.config).generateId) == null ? undefined : _c.call(_b)) != null ? _d : generateId(),
+                url: annotation.url,
+                title: annotation.title
+              });
+            }
+          }
+          break;
+        }
+        case "function_call": {
+          content.push({
+            type: "tool-call",
+            toolCallId: part.call_id,
+            toolName: part.name,
+            input: part.arguments,
+            providerMetadata: {
+              openai: {
+                itemId: part.id
+              }
+            }
+          });
+          break;
+        }
+        case "web_search_call": {
+          content.push({
+            type: "tool-call",
+            toolCallId: part.id,
+            toolName: "web_search_preview",
+            input: "",
+            providerExecuted: true
+          });
+          content.push({
+            type: "tool-result",
+            toolCallId: part.id,
+            toolName: "web_search_preview",
+            result: { status: part.status || "completed" },
+            providerExecuted: true
+          });
+          break;
+        }
+        case "computer_call": {
+          content.push({
+            type: "tool-call",
+            toolCallId: part.id,
+            toolName: "computer_use",
+            input: "",
+            providerExecuted: true
+          });
+          content.push({
+            type: "tool-result",
+            toolCallId: part.id,
+            toolName: "computer_use",
+            result: {
+              type: "computer_use_tool_result",
+              status: part.status || "completed"
+            },
+            providerExecuted: true
+          });
+          break;
+        }
+        case "file_search_call": {
+          content.push({
+            type: "tool-call",
+            toolCallId: part.id,
+            toolName: "file_search",
+            input: "",
+            providerExecuted: true
+          });
+          content.push({
+            type: "tool-result",
+            toolCallId: part.id,
+            toolName: "file_search",
+            result: {
+              type: "file_search_tool_result",
+              status: part.status || "completed"
+            },
+            providerExecuted: true
+          });
+          break;
+        }
+      }
+    }
+    return {
+      content,
+      finishReason: mapOpenAIResponseFinishReason2({
+        finishReason: (_e = response.incomplete_details) == null ? undefined : _e.reason,
+        hasToolCalls: content.some((part) => part.type === "tool-call")
+      }),
+      usage: {
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+        totalTokens: response.usage.input_tokens + response.usage.output_tokens,
+        reasoningTokens: (_g = (_f = response.usage.output_tokens_details) == null ? undefined : _f.reasoning_tokens) != null ? _g : undefined,
+        cachedInputTokens: (_i = (_h = response.usage.input_tokens_details) == null ? undefined : _h.cached_tokens) != null ? _i : undefined
+      },
+      request: { body },
+      response: {
+        id: response.id,
+        timestamp: new Date(response.created_at * 1000),
+        modelId: response.model,
+        headers: responseHeaders,
+        body: rawResponse
+      },
+      providerMetadata: {
+        openai: {
+          responseId: response.id
+        }
+      },
+      warnings
+    };
+  }
+  async doStream(options) {
+    const { args: body, warnings } = await this.getArgs(options);
+    const { responseHeaders, value: response } = await postJsonToApi({
+      url: this.config.url({
+        path: "/responses",
+        modelId: this.modelId
+      }),
+      headers: combineHeaders(this.config.headers(), options.headers),
+      body: {
+        ...body,
+        stream: true
+      },
+      failedResponseHandler: openaiFailedResponseHandler2,
+      successfulResponseHandler: createEventSourceResponseHandler(openaiResponsesChunkSchema2),
+      abortSignal: options.abortSignal,
+      fetch: this.config.fetch
+    });
+    const self = this;
+    let finishReason = "unknown";
+    const usage = {
+      inputTokens: undefined,
+      outputTokens: undefined,
+      totalTokens: undefined
+    };
+    let responseId = null;
+    const ongoingToolCalls = {};
+    let hasToolCalls = false;
+    const activeReasoning = {};
+    return {
+      stream: response.pipeThrough(new TransformStream({
+        start(controller) {
+          controller.enqueue({ type: "stream-start", warnings });
+        },
+        transform(chunk, controller) {
+          var _a15, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m;
+          if (options.includeRawChunks) {
+            controller.enqueue({ type: "raw", rawValue: chunk.rawValue });
+          }
+          if (!chunk.success) {
+            finishReason = "error";
+            controller.enqueue({ type: "error", error: chunk.error });
+            return;
+          }
+          const value = chunk.value;
+          if (isResponseOutputItemAddedChunk2(value)) {
+            if (value.item.type === "function_call") {
+              ongoingToolCalls[value.output_index] = {
+                toolName: value.item.name,
+                toolCallId: value.item.call_id
+              };
+              controller.enqueue({
+                type: "tool-input-start",
+                id: value.item.call_id,
+                toolName: value.item.name
+              });
+            } else if (value.item.type === "web_search_call") {
+              ongoingToolCalls[value.output_index] = {
+                toolName: "web_search_preview",
+                toolCallId: value.item.id
+              };
+              controller.enqueue({
+                type: "tool-input-start",
+                id: value.item.id,
+                toolName: "web_search_preview"
+              });
+            } else if (value.item.type === "computer_call") {
+              ongoingToolCalls[value.output_index] = {
+                toolName: "computer_use",
+                toolCallId: value.item.id
+              };
+              controller.enqueue({
+                type: "tool-input-start",
+                id: value.item.id,
+                toolName: "computer_use"
+              });
+            } else if (value.item.type === "message") {
+              controller.enqueue({
+                type: "text-start",
+                id: value.item.id,
+                providerMetadata: {
+                  openai: {
+                    itemId: value.item.id
+                  }
+                }
+              });
+            } else if (isResponseOutputItemAddedReasoningChunk2(value)) {
+              activeReasoning[value.item.id] = {
+                encryptedContent: value.item.encrypted_content,
+                summaryParts: [0]
+              };
+              controller.enqueue({
+                type: "reasoning-start",
+                id: `${value.item.id}:0`,
+                providerMetadata: {
+                  openai: {
+                    itemId: value.item.id,
+                    reasoningEncryptedContent: (_a15 = value.item.encrypted_content) != null ? _a15 : null
+                  }
+                }
+              });
+            }
+          } else if (isResponseOutputItemDoneChunk2(value)) {
+            if (value.item.type === "function_call") {
+              ongoingToolCalls[value.output_index] = undefined;
+              hasToolCalls = true;
+              controller.enqueue({
+                type: "tool-input-end",
+                id: value.item.call_id
+              });
+              controller.enqueue({
+                type: "tool-call",
+                toolCallId: value.item.call_id,
+                toolName: value.item.name,
+                input: value.item.arguments,
+                providerMetadata: {
+                  openai: {
+                    itemId: value.item.id
+                  }
+                }
+              });
+            } else if (value.item.type === "web_search_call") {
+              ongoingToolCalls[value.output_index] = undefined;
+              hasToolCalls = true;
+              controller.enqueue({
+                type: "tool-input-end",
+                id: value.item.id
+              });
+              controller.enqueue({
+                type: "tool-call",
+                toolCallId: value.item.id,
+                toolName: "web_search_preview",
+                input: "",
+                providerExecuted: true
+              });
+              controller.enqueue({
+                type: "tool-result",
+                toolCallId: value.item.id,
+                toolName: "web_search_preview",
+                result: {
+                  type: "web_search_tool_result",
+                  status: value.item.status || "completed"
+                },
+                providerExecuted: true
+              });
+            } else if (value.item.type === "computer_call") {
+              ongoingToolCalls[value.output_index] = undefined;
+              hasToolCalls = true;
+              controller.enqueue({
+                type: "tool-input-end",
+                id: value.item.id
+              });
+              controller.enqueue({
+                type: "tool-call",
+                toolCallId: value.item.id,
+                toolName: "computer_use",
+                input: "",
+                providerExecuted: true
+              });
+              controller.enqueue({
+                type: "tool-result",
+                toolCallId: value.item.id,
+                toolName: "computer_use",
+                result: {
+                  type: "computer_use_tool_result",
+                  status: value.item.status || "completed"
+                },
+                providerExecuted: true
+              });
+            } else if (value.item.type === "message") {
+              controller.enqueue({
+                type: "text-end",
+                id: value.item.id
+              });
+            } else if (isResponseOutputItemDoneReasoningChunk2(value)) {
+              const activeReasoningPart = activeReasoning[value.item.id];
+              for (const summaryIndex of activeReasoningPart.summaryParts) {
+                controller.enqueue({
+                  type: "reasoning-end",
+                  id: `${value.item.id}:${summaryIndex}`,
+                  providerMetadata: {
+                    openai: {
+                      itemId: value.item.id,
+                      reasoningEncryptedContent: (_b = value.item.encrypted_content) != null ? _b : null
+                    }
+                  }
+                });
+              }
+              delete activeReasoning[value.item.id];
+            }
+          } else if (isResponseFunctionCallArgumentsDeltaChunk2(value)) {
+            const toolCall = ongoingToolCalls[value.output_index];
+            if (toolCall != null) {
+              controller.enqueue({
+                type: "tool-input-delta",
+                id: toolCall.toolCallId,
+                delta: value.delta
+              });
+            }
+          } else if (isResponseCreatedChunk2(value)) {
+            responseId = value.response.id;
+            controller.enqueue({
+              type: "response-metadata",
+              id: value.response.id,
+              timestamp: new Date(value.response.created_at * 1000),
+              modelId: value.response.model
+            });
+          } else if (isTextDeltaChunk2(value)) {
+            controller.enqueue({
+              type: "text-delta",
+              id: value.item_id,
+              delta: value.delta
+            });
+          } else if (isResponseReasoningSummaryPartAddedChunk2(value)) {
+            if (value.summary_index > 0) {
+              (_c = activeReasoning[value.item_id]) == null || _c.summaryParts.push(value.summary_index);
+              controller.enqueue({
+                type: "reasoning-start",
+                id: `${value.item_id}:${value.summary_index}`,
+                providerMetadata: {
+                  openai: {
+                    itemId: value.item_id,
+                    reasoningEncryptedContent: (_e = (_d = activeReasoning[value.item_id]) == null ? undefined : _d.encryptedContent) != null ? _e : null
+                  }
+                }
+              });
+            }
+          } else if (isResponseReasoningSummaryTextDeltaChunk2(value)) {
+            controller.enqueue({
+              type: "reasoning-delta",
+              id: `${value.item_id}:${value.summary_index}`,
+              delta: value.delta,
+              providerMetadata: {
+                openai: {
+                  itemId: value.item_id
+                }
+              }
+            });
+          } else if (isResponseFinishedChunk2(value)) {
+            finishReason = mapOpenAIResponseFinishReason2({
+              finishReason: (_f = value.response.incomplete_details) == null ? undefined : _f.reason,
+              hasToolCalls
+            });
+            usage.inputTokens = value.response.usage.input_tokens;
+            usage.outputTokens = value.response.usage.output_tokens;
+            usage.totalTokens = value.response.usage.input_tokens + value.response.usage.output_tokens;
+            usage.reasoningTokens = (_h = (_g = value.response.usage.output_tokens_details) == null ? undefined : _g.reasoning_tokens) != null ? _h : undefined;
+            usage.cachedInputTokens = (_j = (_i = value.response.usage.input_tokens_details) == null ? undefined : _i.cached_tokens) != null ? _j : undefined;
+          } else if (isResponseAnnotationAddedChunk2(value)) {
+            controller.enqueue({
+              type: "source",
+              sourceType: "url",
+              id: (_m = (_l = (_k = self.config).generateId) == null ? undefined : _l.call(_k)) != null ? _m : generateId(),
+              url: value.annotation.url,
+              title: value.annotation.title
+            });
+          } else if (isErrorChunk2(value)) {
+            controller.enqueue({ type: "error", error: value });
+          }
+        },
+        flush(controller) {
+          controller.enqueue({
+            type: "finish",
+            finishReason,
+            usage,
+            providerMetadata: {
+              openai: {
+                responseId
+              }
+            }
+          });
+        }
+      })),
+      request: { body },
+      response: { headers: responseHeaders }
+    };
+  }
+};
+var usageSchema22 = exports_external.object({
+  input_tokens: exports_external.number(),
+  input_tokens_details: exports_external.object({ cached_tokens: exports_external.number().nullish() }).nullish(),
+  output_tokens: exports_external.number(),
+  output_tokens_details: exports_external.object({ reasoning_tokens: exports_external.number().nullish() }).nullish()
+});
+var textDeltaChunkSchema2 = exports_external.object({
+  type: exports_external.literal("response.output_text.delta"),
+  item_id: exports_external.string(),
+  delta: exports_external.string()
+});
+var errorChunkSchema2 = exports_external.object({
+  type: exports_external.literal("error"),
+  code: exports_external.string(),
+  message: exports_external.string(),
+  param: exports_external.string().nullish(),
+  sequence_number: exports_external.number()
+});
+var responseFinishedChunkSchema2 = exports_external.object({
+  type: exports_external.enum(["response.completed", "response.incomplete"]),
+  response: exports_external.object({
+    incomplete_details: exports_external.object({ reason: exports_external.string() }).nullish(),
+    usage: usageSchema22
+  })
+});
+var responseCreatedChunkSchema2 = exports_external.object({
+  type: exports_external.literal("response.created"),
+  response: exports_external.object({
+    id: exports_external.string(),
+    created_at: exports_external.number(),
+    model: exports_external.string()
+  })
+});
+var responseOutputItemAddedSchema2 = exports_external.object({
+  type: exports_external.literal("response.output_item.added"),
+  output_index: exports_external.number(),
+  item: exports_external.discriminatedUnion("type", [
+    exports_external.object({
+      type: exports_external.literal("message"),
+      id: exports_external.string()
+    }),
+    exports_external.object({
+      type: exports_external.literal("reasoning"),
+      id: exports_external.string(),
+      encrypted_content: exports_external.string().nullish()
+    }),
+    exports_external.object({
+      type: exports_external.literal("function_call"),
+      id: exports_external.string(),
+      call_id: exports_external.string(),
+      name: exports_external.string(),
+      arguments: exports_external.string()
+    }),
+    exports_external.object({
+      type: exports_external.literal("web_search_call"),
+      id: exports_external.string(),
+      status: exports_external.string()
+    }),
+    exports_external.object({
+      type: exports_external.literal("computer_call"),
+      id: exports_external.string(),
+      status: exports_external.string()
+    }),
+    exports_external.object({
+      type: exports_external.literal("file_search_call"),
+      id: exports_external.string(),
+      status: exports_external.string()
+    })
+  ])
+});
+var responseOutputItemDoneSchema2 = exports_external.object({
+  type: exports_external.literal("response.output_item.done"),
+  output_index: exports_external.number(),
+  item: exports_external.discriminatedUnion("type", [
+    exports_external.object({
+      type: exports_external.literal("message"),
+      id: exports_external.string()
+    }),
+    exports_external.object({
+      type: exports_external.literal("reasoning"),
+      id: exports_external.string(),
+      encrypted_content: exports_external.string().nullish()
+    }),
+    exports_external.object({
+      type: exports_external.literal("function_call"),
+      id: exports_external.string(),
+      call_id: exports_external.string(),
+      name: exports_external.string(),
+      arguments: exports_external.string(),
+      status: exports_external.literal("completed")
+    }),
+    exports_external.object({
+      type: exports_external.literal("web_search_call"),
+      id: exports_external.string(),
+      status: exports_external.literal("completed")
+    }),
+    exports_external.object({
+      type: exports_external.literal("computer_call"),
+      id: exports_external.string(),
+      status: exports_external.literal("completed")
+    }),
+    exports_external.object({
+      type: exports_external.literal("file_search_call"),
+      id: exports_external.string(),
+      status: exports_external.literal("completed")
+    })
+  ])
+});
+var responseFunctionCallArgumentsDeltaSchema2 = exports_external.object({
+  type: exports_external.literal("response.function_call_arguments.delta"),
+  item_id: exports_external.string(),
+  output_index: exports_external.number(),
+  delta: exports_external.string()
+});
+var responseAnnotationAddedSchema2 = exports_external.object({
+  type: exports_external.literal("response.output_text.annotation.added"),
+  annotation: exports_external.object({
+    type: exports_external.literal("url_citation"),
+    url: exports_external.string(),
+    title: exports_external.string()
+  })
+});
+var responseReasoningSummaryPartAddedSchema2 = exports_external.object({
+  type: exports_external.literal("response.reasoning_summary_part.added"),
+  item_id: exports_external.string(),
+  summary_index: exports_external.number()
+});
+var responseReasoningSummaryTextDeltaSchema2 = exports_external.object({
+  type: exports_external.literal("response.reasoning_summary_text.delta"),
+  item_id: exports_external.string(),
+  summary_index: exports_external.number(),
+  delta: exports_external.string()
+});
+var openaiResponsesChunkSchema2 = exports_external.union([
+  textDeltaChunkSchema2,
+  responseFinishedChunkSchema2,
+  responseCreatedChunkSchema2,
+  responseOutputItemAddedSchema2,
+  responseOutputItemDoneSchema2,
+  responseFunctionCallArgumentsDeltaSchema2,
+  responseAnnotationAddedSchema2,
+  responseReasoningSummaryPartAddedSchema2,
+  responseReasoningSummaryTextDeltaSchema2,
+  errorChunkSchema2,
+  exports_external.object({ type: exports_external.string() }).loose()
+]);
+function isTextDeltaChunk2(chunk) {
+  return chunk.type === "response.output_text.delta";
+}
+function isResponseOutputItemDoneChunk2(chunk) {
+  return chunk.type === "response.output_item.done";
+}
+function isResponseOutputItemDoneReasoningChunk2(chunk) {
+  return isResponseOutputItemDoneChunk2(chunk) && chunk.item.type === "reasoning";
+}
+function isResponseFinishedChunk2(chunk) {
+  return chunk.type === "response.completed" || chunk.type === "response.incomplete";
+}
+function isResponseCreatedChunk2(chunk) {
+  return chunk.type === "response.created";
+}
+function isResponseFunctionCallArgumentsDeltaChunk2(chunk) {
+  return chunk.type === "response.function_call_arguments.delta";
+}
+function isResponseOutputItemAddedChunk2(chunk) {
+  return chunk.type === "response.output_item.added";
+}
+function isResponseOutputItemAddedReasoningChunk2(chunk) {
+  return isResponseOutputItemAddedChunk2(chunk) && chunk.item.type === "reasoning";
+}
+function isResponseAnnotationAddedChunk2(chunk) {
+  return chunk.type === "response.output_text.annotation.added";
+}
+function isResponseReasoningSummaryPartAddedChunk2(chunk) {
+  return chunk.type === "response.reasoning_summary_part.added";
+}
+function isResponseReasoningSummaryTextDeltaChunk2(chunk) {
+  return chunk.type === "response.reasoning_summary_text.delta";
+}
+function isErrorChunk2(chunk) {
+  return chunk.type === "error";
+}
+function getResponsesModelConfig2(modelId) {
+  if (modelId.startsWith("o") || modelId.startsWith("codex-") || modelId.startsWith("computer-use")) {
+    if (modelId.startsWith("o1-mini") || modelId.startsWith("o1-preview")) {
+      return {
+        isReasoningModel: true,
+        systemMessageMode: "remove",
+        requiredAutoTruncation: false
+      };
+    }
+    return {
+      isReasoningModel: true,
+      systemMessageMode: "developer",
+      requiredAutoTruncation: false
+    };
+  }
+  return {
+    isReasoningModel: false,
+    systemMessageMode: "system",
+    requiredAutoTruncation: false
+  };
+}
+function supportsFlexProcessing22(modelId) {
+  return modelId.startsWith("o3") || modelId.startsWith("o4-mini");
+}
+function supportsPriorityProcessing22(modelId) {
+  return modelId.startsWith("gpt-4") || modelId.startsWith("o3") || modelId.startsWith("o4-mini");
+}
+var openaiResponsesProviderOptionsSchema2 = exports_external.object({
+  metadata: exports_external.any().nullish(),
+  parallelToolCalls: exports_external.boolean().nullish(),
+  previousResponseId: exports_external.string().nullish(),
+  store: exports_external.boolean().nullish(),
+  user: exports_external.string().nullish(),
+  reasoningEffort: exports_external.string().nullish(),
+  strictJsonSchema: exports_external.boolean().nullish(),
+  instructions: exports_external.string().nullish(),
+  reasoningSummary: exports_external.string().nullish(),
+  serviceTier: exports_external.enum(["auto", "flex", "priority"]).nullish(),
+  include: exports_external.array(exports_external.enum(["reasoning.encrypted_content", "file_search_call.results"])).nullish()
+});
+var OpenAIProviderOptionsSchema2 = exports_external.object({
+  instructions: exports_external.string().nullish(),
+  speed: exports_external.number().min(0.25).max(4).default(1).nullish()
+});
+var OpenAISpeechModel2 = class {
+  constructor(modelId, config2) {
+    this.modelId = modelId;
+    this.config = config2;
+    this.specificationVersion = "v2";
+  }
+  get provider() {
+    return this.config.provider;
+  }
+  async getArgs({
+    text,
+    voice = "alloy",
+    outputFormat = "mp3",
+    speed,
+    instructions,
+    language,
+    providerOptions
+  }) {
+    const warnings = [];
+    const openAIOptions = await parseProviderOptions({
+      provider: "openai",
+      providerOptions,
+      schema: OpenAIProviderOptionsSchema2
+    });
+    const requestBody = {
+      model: this.modelId,
+      input: text,
+      voice,
+      response_format: "mp3",
+      speed,
+      instructions
+    };
+    if (outputFormat) {
+      if (["mp3", "opus", "aac", "flac", "wav", "pcm"].includes(outputFormat)) {
+        requestBody.response_format = outputFormat;
+      } else {
+        warnings.push({
+          type: "unsupported-setting",
+          setting: "outputFormat",
+          details: `Unsupported output format: ${outputFormat}. Using mp3 instead.`
+        });
+      }
+    }
+    if (openAIOptions) {
+      const speechModelOptions = {};
+      for (const key in speechModelOptions) {
+        const value = speechModelOptions[key];
+        if (value !== undefined) {
+          requestBody[key] = value;
+        }
+      }
+    }
+    if (language) {
+      warnings.push({
+        type: "unsupported-setting",
+        setting: "language",
+        details: `OpenAI speech models do not support language selection. Language parameter "${language}" was ignored.`
+      });
+    }
+    return {
+      requestBody,
+      warnings
+    };
+  }
+  async doGenerate(options) {
+    var _a15, _b, _c;
+    const currentDate = (_c = (_b = (_a15 = this.config._internal) == null ? undefined : _a15.currentDate) == null ? undefined : _b.call(_a15)) != null ? _c : /* @__PURE__ */ new Date;
+    const { requestBody, warnings } = await this.getArgs(options);
+    const {
+      value: audio,
+      responseHeaders,
+      rawValue: rawResponse
+    } = await postJsonToApi({
+      url: this.config.url({
+        path: "/audio/speech",
+        modelId: this.modelId
+      }),
+      headers: combineHeaders(this.config.headers(), options.headers),
+      body: requestBody,
+      failedResponseHandler: openaiFailedResponseHandler2,
+      successfulResponseHandler: createBinaryResponseHandler(),
+      abortSignal: options.abortSignal,
+      fetch: this.config.fetch
+    });
+    return {
+      audio,
+      warnings,
+      request: {
+        body: JSON.stringify(requestBody)
+      },
+      response: {
+        timestamp: currentDate,
+        modelId: this.modelId,
+        headers: responseHeaders,
+        body: rawResponse
+      }
+    };
+  }
+};
+function createOpenAI2(options = {}) {
+  var _a15, _b;
+  const baseURL = (_a15 = withoutTrailingSlash(options.baseURL)) != null ? _a15 : "https://api.openai.com/v1";
+  const providerName = (_b = options.name) != null ? _b : "openai";
+  const getHeaders = () => ({
+    Authorization: `Bearer ${loadApiKey({
+      apiKey: options.apiKey,
+      environmentVariableName: "OPENAI_API_KEY",
+      description: "OpenAI"
+    })}`,
+    "OpenAI-Organization": options.organization,
+    "OpenAI-Project": options.project,
+    ...options.headers
+  });
+  const createChatModel = (modelId) => new OpenAIChatLanguageModel2(modelId, {
+    provider: `${providerName}.chat`,
+    url: ({ path }) => `${baseURL}${path}`,
+    headers: getHeaders,
+    fetch: options.fetch
+  });
+  const createCompletionModel = (modelId) => new OpenAICompletionLanguageModel2(modelId, {
+    provider: `${providerName}.completion`,
+    url: ({ path }) => `${baseURL}${path}`,
+    headers: getHeaders,
+    fetch: options.fetch
+  });
+  const createEmbeddingModel = (modelId) => new OpenAIEmbeddingModel2(modelId, {
+    provider: `${providerName}.embedding`,
+    url: ({ path }) => `${baseURL}${path}`,
+    headers: getHeaders,
+    fetch: options.fetch
+  });
+  const createImageModel = (modelId) => new OpenAIImageModel2(modelId, {
+    provider: `${providerName}.image`,
+    url: ({ path }) => `${baseURL}${path}`,
+    headers: getHeaders,
+    fetch: options.fetch
+  });
+  const createTranscriptionModel = (modelId) => new OpenAITranscriptionModel2(modelId, {
+    provider: `${providerName}.transcription`,
+    url: ({ path }) => `${baseURL}${path}`,
+    headers: getHeaders,
+    fetch: options.fetch
+  });
+  const createSpeechModel = (modelId) => new OpenAISpeechModel2(modelId, {
+    provider: `${providerName}.speech`,
+    url: ({ path }) => `${baseURL}${path}`,
+    headers: getHeaders,
+    fetch: options.fetch
+  });
+  const createLanguageModel = (modelId) => {
+    if (new.target) {
+      throw new Error("The OpenAI model function cannot be called with the new keyword.");
+    }
+    return createResponsesModel(modelId);
+  };
+  const createResponsesModel = (modelId) => {
+    return new OpenAIResponsesLanguageModel2(modelId, {
+      provider: `${providerName}.responses`,
+      url: ({ path }) => `${baseURL}${path}`,
+      headers: getHeaders,
+      fetch: options.fetch
+    });
+  };
+  const provider = function(modelId) {
+    return createLanguageModel(modelId);
+  };
+  provider.languageModel = createLanguageModel;
+  provider.chat = createChatModel;
+  provider.completion = createCompletionModel;
+  provider.responses = createResponsesModel;
+  provider.embedding = createEmbeddingModel;
+  provider.textEmbedding = createEmbeddingModel;
+  provider.textEmbeddingModel = createEmbeddingModel;
+  provider.image = createImageModel;
+  provider.imageModel = createImageModel;
+  provider.transcription = createTranscriptionModel;
+  provider.transcriptionModel = createTranscriptionModel;
+  provider.speech = createSpeechModel;
+  provider.speechModel = createSpeechModel;
+  provider.tools = openaiTools2;
+  return provider;
+}
+var openai2 = createOpenAI2();
 
 // ../../node_modules/@ai-sdk/gateway/node_modules/@ai-sdk/provider/dist/index.mjs
 var marker15 = "vercel.ai.error";
@@ -24368,7 +29247,7 @@ function createProviderDefinedToolFactoryWithOutputSchema2({
   outputSchema
 }) {
   return ({
-    execute,
+    execute: execute2,
     toModelOutput,
     onInputStart,
     onInputDelta,
@@ -24381,7 +29260,7 @@ function createProviderDefinedToolFactoryWithOutputSchema2({
     args,
     inputSchema,
     outputSchema,
-    execute,
+    execute: execute2,
     toModelOutput,
     onInputStart,
     onInputDelta,
@@ -28011,11 +32890,11 @@ function isAsyncIterable(obj) {
   return obj != null && typeof obj[Symbol.asyncIterator] === "function";
 }
 async function* executeTool({
-  execute,
+  execute: execute2,
   input,
   options
 }) {
-  const result = execute(input, options);
+  const result = execute2(input, options);
   if (isAsyncIterable(result)) {
     let lastOutput;
     for await (const output of result) {
@@ -30918,4959 +35797,285 @@ var uiMessagesSchema = lazyValidator2(() => zodSchema2(exports_external.array(ex
   ])).nonempty("Message must contain at least one part")
 })).nonempty("Messages array must not be empty")));
 
-// ../../node_modules/@ai-sdk/anthropic/dist/index.mjs
-var anthropicErrorDataSchema2 = exports_external.object({
-  type: exports_external.literal("error"),
-  error: exports_external.object({
-    type: exports_external.string(),
-    message: exports_external.string()
-  })
-});
-var anthropicFailedResponseHandler2 = createJsonErrorResponseHandler({
-  errorSchema: anthropicErrorDataSchema2,
-  errorToMessage: (data) => data.error.message
-});
-var anthropicFilePartProviderOptions2 = exports_external.object({
-  citations: exports_external.object({
-    enabled: exports_external.boolean()
-  }).optional(),
-  title: exports_external.string().optional(),
-  context: exports_external.string().optional()
-});
-var anthropicProviderOptions2 = exports_external.object({
-  sendReasoning: exports_external.boolean().optional(),
-  thinking: exports_external.object({
-    type: exports_external.union([exports_external.literal("enabled"), exports_external.literal("disabled")]),
-    budgetTokens: exports_external.number().optional()
-  }).optional(),
-  disableParallelToolUse: exports_external.boolean().optional()
-});
-function getCacheControl2(providerMetadata) {
-  var _a16;
-  const anthropic2 = providerMetadata == null ? undefined : providerMetadata.anthropic;
-  const cacheControlValue = (_a16 = anthropic2 == null ? undefined : anthropic2.cacheControl) != null ? _a16 : anthropic2 == null ? undefined : anthropic2.cache_control;
-  return cacheControlValue;
-}
-var webSearch_20250305ArgsSchema2 = exports_external.object({
-  maxUses: exports_external.number().optional(),
-  allowedDomains: exports_external.array(exports_external.string()).optional(),
-  blockedDomains: exports_external.array(exports_external.string()).optional(),
-  userLocation: exports_external.object({
-    type: exports_external.literal("approximate"),
-    city: exports_external.string().optional(),
-    region: exports_external.string().optional(),
-    country: exports_external.string().optional(),
-    timezone: exports_external.string().optional()
-  }).optional()
-});
-var webSearch_20250305OutputSchema2 = exports_external.array(exports_external.object({
-  url: exports_external.string(),
-  title: exports_external.string(),
-  pageAge: exports_external.string().nullable(),
-  encryptedContent: exports_external.string(),
-  type: exports_external.string()
-}));
-var factory2 = createProviderDefinedToolFactoryWithOutputSchema({
-  id: "anthropic.web_search_20250305",
-  name: "web_search",
-  inputSchema: exports_external.object({
-    query: exports_external.string()
-  }),
-  outputSchema: webSearch_20250305OutputSchema2
-});
-var webSearch_202503052 = (args = {}) => {
-  return factory2(args);
-};
-function isWebSearchTool2(tool3) {
-  return typeof tool3 === "object" && tool3 !== null && "type" in tool3 && tool3.type === "web_search_20250305";
-}
-function prepareTools3({
-  tools,
-  toolChoice,
-  disableParallelToolUse
-}) {
-  tools = (tools == null ? undefined : tools.length) ? tools : undefined;
-  const toolWarnings = [];
-  const betas = /* @__PURE__ */ new Set;
-  if (tools == null) {
-    return { tools: undefined, toolChoice: undefined, toolWarnings, betas };
-  }
-  const anthropicTools2 = [];
-  for (const tool3 of tools) {
-    if (isWebSearchTool2(tool3)) {
-      anthropicTools2.push(tool3);
-      continue;
-    }
-    switch (tool3.type) {
-      case "function":
-        const cacheControl = getCacheControl2(tool3.providerOptions);
-        anthropicTools2.push({
-          name: tool3.name,
-          description: tool3.description,
-          input_schema: tool3.inputSchema,
-          cache_control: cacheControl
-        });
-        break;
-      case "provider-defined":
-        switch (tool3.id) {
-          case "anthropic.computer_20250124":
-            betas.add("computer-use-2025-01-24");
-            anthropicTools2.push({
-              name: "computer",
-              type: "computer_20250124",
-              display_width_px: tool3.args.displayWidthPx,
-              display_height_px: tool3.args.displayHeightPx,
-              display_number: tool3.args.displayNumber
-            });
-            break;
-          case "anthropic.computer_20241022":
-            betas.add("computer-use-2024-10-22");
-            anthropicTools2.push({
-              name: "computer",
-              type: "computer_20241022",
-              display_width_px: tool3.args.displayWidthPx,
-              display_height_px: tool3.args.displayHeightPx,
-              display_number: tool3.args.displayNumber
-            });
-            break;
-          case "anthropic.text_editor_20250124":
-            betas.add("computer-use-2025-01-24");
-            anthropicTools2.push({
-              name: "str_replace_editor",
-              type: "text_editor_20250124"
-            });
-            break;
-          case "anthropic.text_editor_20241022":
-            betas.add("computer-use-2024-10-22");
-            anthropicTools2.push({
-              name: "str_replace_editor",
-              type: "text_editor_20241022"
-            });
-            break;
-          case "anthropic.text_editor_20250429":
-            betas.add("computer-use-2025-01-24");
-            anthropicTools2.push({
-              name: "str_replace_based_edit_tool",
-              type: "text_editor_20250429"
-            });
-            break;
-          case "anthropic.bash_20250124":
-            betas.add("computer-use-2025-01-24");
-            anthropicTools2.push({
-              name: "bash",
-              type: "bash_20250124"
-            });
-            break;
-          case "anthropic.bash_20241022":
-            betas.add("computer-use-2024-10-22");
-            anthropicTools2.push({
-              name: "bash",
-              type: "bash_20241022"
-            });
-            break;
-          case "anthropic.web_search_20250305": {
-            const args = webSearch_20250305ArgsSchema2.parse(tool3.args);
-            anthropicTools2.push({
-              type: "web_search_20250305",
-              name: "web_search",
-              max_uses: args.maxUses,
-              allowed_domains: args.allowedDomains,
-              blocked_domains: args.blockedDomains,
-              user_location: args.userLocation
-            });
-            break;
-          }
-          default:
-            toolWarnings.push({ type: "unsupported-tool", tool: tool3 });
-            break;
-        }
-        break;
-      default:
-        toolWarnings.push({ type: "unsupported-tool", tool: tool3 });
-        break;
-    }
-  }
-  if (toolChoice == null) {
-    return {
-      tools: anthropicTools2,
-      toolChoice: disableParallelToolUse ? { type: "auto", disable_parallel_tool_use: disableParallelToolUse } : undefined,
-      toolWarnings,
-      betas
-    };
-  }
-  const type = toolChoice.type;
-  switch (type) {
-    case "auto":
-      return {
-        tools: anthropicTools2,
-        toolChoice: {
-          type: "auto",
-          disable_parallel_tool_use: disableParallelToolUse
-        },
-        toolWarnings,
-        betas
-      };
-    case "required":
-      return {
-        tools: anthropicTools2,
-        toolChoice: {
-          type: "any",
-          disable_parallel_tool_use: disableParallelToolUse
-        },
-        toolWarnings,
-        betas
-      };
-    case "none":
-      return { tools: undefined, toolChoice: undefined, toolWarnings, betas };
-    case "tool":
-      return {
-        tools: anthropicTools2,
-        toolChoice: {
-          type: "tool",
-          name: toolChoice.toolName,
-          disable_parallel_tool_use: disableParallelToolUse
-        },
-        toolWarnings,
-        betas
-      };
-    default: {
-      const _exhaustiveCheck = type;
-      throw new UnsupportedFunctionalityError({
-        functionality: `tool choice type: ${_exhaustiveCheck}`
-      });
-    }
-  }
-}
-function convertToString2(data) {
-  if (typeof data === "string") {
-    return Buffer.from(data, "base64").toString("utf-8");
-  }
-  if (data instanceof Uint8Array) {
-    return new TextDecoder().decode(data);
-  }
-  if (data instanceof URL) {
-    throw new UnsupportedFunctionalityError({
-      functionality: "URL-based text documents are not supported for citations"
-    });
-  }
-  throw new UnsupportedFunctionalityError({
-    functionality: `unsupported data type for text documents: ${typeof data}`
-  });
-}
-async function convertToAnthropicMessagesPrompt2({
-  prompt,
-  sendReasoning,
-  warnings
-}) {
-  var _a16, _b16, _c, _d, _e;
-  const betas = /* @__PURE__ */ new Set;
-  const blocks = groupIntoBlocks2(prompt);
-  let system = undefined;
-  const messages = [];
-  async function shouldEnableCitations(providerMetadata) {
-    var _a26, _b24;
-    const anthropicOptions = await parseProviderOptions({
-      provider: "anthropic",
-      providerOptions: providerMetadata,
-      schema: anthropicFilePartProviderOptions2
-    });
-    return (_b24 = (_a26 = anthropicOptions == null ? undefined : anthropicOptions.citations) == null ? undefined : _a26.enabled) != null ? _b24 : false;
-  }
-  async function getDocumentMetadata(providerMetadata) {
-    const anthropicOptions = await parseProviderOptions({
-      provider: "anthropic",
-      providerOptions: providerMetadata,
-      schema: anthropicFilePartProviderOptions2
-    });
-    return {
-      title: anthropicOptions == null ? undefined : anthropicOptions.title,
-      context: anthropicOptions == null ? undefined : anthropicOptions.context
-    };
-  }
-  for (let i = 0;i < blocks.length; i++) {
-    const block = blocks[i];
-    const isLastBlock = i === blocks.length - 1;
-    const type = block.type;
-    switch (type) {
-      case "system": {
-        if (system != null) {
-          throw new UnsupportedFunctionalityError({
-            functionality: "Multiple system messages that are separated by user/assistant messages"
-          });
-        }
-        system = block.messages.map(({ content, providerOptions }) => ({
-          type: "text",
-          text: content,
-          cache_control: getCacheControl2(providerOptions)
-        }));
-        break;
-      }
-      case "user": {
-        const anthropicContent = [];
-        for (const message of block.messages) {
-          const { role, content } = message;
-          switch (role) {
-            case "user": {
-              for (let j = 0;j < content.length; j++) {
-                const part = content[j];
-                const isLastPart = j === content.length - 1;
-                const cacheControl = (_a16 = getCacheControl2(part.providerOptions)) != null ? _a16 : isLastPart ? getCacheControl2(message.providerOptions) : undefined;
-                switch (part.type) {
-                  case "text": {
-                    anthropicContent.push({
-                      type: "text",
-                      text: part.text,
-                      cache_control: cacheControl
-                    });
-                    break;
-                  }
-                  case "file": {
-                    if (part.mediaType.startsWith("image/")) {
-                      anthropicContent.push({
-                        type: "image",
-                        source: part.data instanceof URL ? {
-                          type: "url",
-                          url: part.data.toString()
-                        } : {
-                          type: "base64",
-                          media_type: part.mediaType === "image/*" ? "image/jpeg" : part.mediaType,
-                          data: convertToBase64(part.data)
-                        },
-                        cache_control: cacheControl
-                      });
-                    } else if (part.mediaType === "application/pdf") {
-                      betas.add("pdfs-2024-09-25");
-                      const enableCitations = await shouldEnableCitations(part.providerOptions);
-                      const metadata = await getDocumentMetadata(part.providerOptions);
-                      anthropicContent.push({
-                        type: "document",
-                        source: part.data instanceof URL ? {
-                          type: "url",
-                          url: part.data.toString()
-                        } : {
-                          type: "base64",
-                          media_type: "application/pdf",
-                          data: convertToBase64(part.data)
-                        },
-                        title: (_b16 = metadata.title) != null ? _b16 : part.filename,
-                        ...metadata.context && { context: metadata.context },
-                        ...enableCitations && {
-                          citations: { enabled: true }
-                        },
-                        cache_control: cacheControl
-                      });
-                    } else if (part.mediaType === "text/plain") {
-                      const enableCitations = await shouldEnableCitations(part.providerOptions);
-                      const metadata = await getDocumentMetadata(part.providerOptions);
-                      anthropicContent.push({
-                        type: "document",
-                        source: part.data instanceof URL ? {
-                          type: "url",
-                          url: part.data.toString()
-                        } : {
-                          type: "text",
-                          media_type: "text/plain",
-                          data: convertToString2(part.data)
-                        },
-                        title: (_c = metadata.title) != null ? _c : part.filename,
-                        ...metadata.context && { context: metadata.context },
-                        ...enableCitations && {
-                          citations: { enabled: true }
-                        },
-                        cache_control: cacheControl
-                      });
-                    } else {
-                      throw new UnsupportedFunctionalityError({
-                        functionality: `media type: ${part.mediaType}`
-                      });
-                    }
-                    break;
-                  }
-                }
-              }
-              break;
-            }
-            case "tool": {
-              for (let i2 = 0;i2 < content.length; i2++) {
-                const part = content[i2];
-                const isLastPart = i2 === content.length - 1;
-                const cacheControl = (_d = getCacheControl2(part.providerOptions)) != null ? _d : isLastPart ? getCacheControl2(message.providerOptions) : undefined;
-                const output = part.output;
-                let contentValue;
-                switch (output.type) {
-                  case "content":
-                    contentValue = output.value.map((contentPart) => {
-                      switch (contentPart.type) {
-                        case "text":
-                          return {
-                            type: "text",
-                            text: contentPart.text,
-                            cache_control: undefined
-                          };
-                        case "media": {
-                          if (contentPart.mediaType.startsWith("image/")) {
-                            return {
-                              type: "image",
-                              source: {
-                                type: "base64",
-                                media_type: contentPart.mediaType,
-                                data: contentPart.data
-                              },
-                              cache_control: undefined
-                            };
-                          }
-                          throw new UnsupportedFunctionalityError({
-                            functionality: `media type: ${contentPart.mediaType}`
-                          });
-                        }
-                      }
-                    });
-                    break;
-                  case "text":
-                  case "error-text":
-                    contentValue = output.value;
-                    break;
-                  case "json":
-                  case "error-json":
-                  default:
-                    contentValue = JSON.stringify(output.value);
-                    break;
-                }
-                anthropicContent.push({
-                  type: "tool_result",
-                  tool_use_id: part.toolCallId,
-                  content: contentValue,
-                  is_error: output.type === "error-text" || output.type === "error-json" ? true : undefined,
-                  cache_control: cacheControl
-                });
-              }
-              break;
-            }
-            default: {
-              const _exhaustiveCheck = role;
-              throw new Error(`Unsupported role: ${_exhaustiveCheck}`);
-            }
-          }
-        }
-        messages.push({ role: "user", content: anthropicContent });
-        break;
-      }
-      case "assistant": {
-        const anthropicContent = [];
-        for (let j = 0;j < block.messages.length; j++) {
-          const message = block.messages[j];
-          const isLastMessage = j === block.messages.length - 1;
-          const { content } = message;
-          for (let k = 0;k < content.length; k++) {
-            const part = content[k];
-            const isLastContentPart = k === content.length - 1;
-            const cacheControl = (_e = getCacheControl2(part.providerOptions)) != null ? _e : isLastContentPart ? getCacheControl2(message.providerOptions) : undefined;
-            switch (part.type) {
-              case "text": {
-                anthropicContent.push({
-                  type: "text",
-                  text: isLastBlock && isLastMessage && isLastContentPart ? part.text.trim() : part.text,
-                  cache_control: cacheControl
-                });
-                break;
-              }
-              case "reasoning": {
-                if (sendReasoning) {
-                  const reasoningMetadata = await parseProviderOptions({
-                    provider: "anthropic",
-                    providerOptions: part.providerOptions,
-                    schema: anthropicReasoningMetadataSchema2
-                  });
-                  if (reasoningMetadata != null) {
-                    if (reasoningMetadata.signature != null) {
-                      anthropicContent.push({
-                        type: "thinking",
-                        thinking: part.text,
-                        signature: reasoningMetadata.signature,
-                        cache_control: cacheControl
-                      });
-                    } else if (reasoningMetadata.redactedData != null) {
-                      anthropicContent.push({
-                        type: "redacted_thinking",
-                        data: reasoningMetadata.redactedData,
-                        cache_control: cacheControl
-                      });
-                    } else {
-                      warnings.push({
-                        type: "other",
-                        message: "unsupported reasoning metadata"
-                      });
-                    }
-                  } else {
-                    warnings.push({
-                      type: "other",
-                      message: "unsupported reasoning metadata"
-                    });
-                  }
-                } else {
-                  warnings.push({
-                    type: "other",
-                    message: "sending reasoning content is disabled for this model"
-                  });
-                }
-                break;
-              }
-              case "tool-call": {
-                if (part.providerExecuted) {
-                  if (part.toolName === "web_search") {
-                    anthropicContent.push({
-                      type: "server_tool_use",
-                      id: part.toolCallId,
-                      name: "web_search",
-                      input: part.input,
-                      cache_control: cacheControl
-                    });
-                    break;
-                  }
-                  warnings.push({
-                    type: "other",
-                    message: `provider executed tool call for tool ${part.toolName} is not supported`
-                  });
-                  break;
-                }
-                anthropicContent.push({
-                  type: "tool_use",
-                  id: part.toolCallId,
-                  name: part.toolName,
-                  input: part.input,
-                  cache_control: cacheControl
-                });
-                break;
-              }
-              case "tool-result": {
-                if (part.toolName === "web_search") {
-                  const output = part.output;
-                  if (output.type !== "json") {
-                    warnings.push({
-                      type: "other",
-                      message: `provider executed tool result output type ${output.type} for tool ${part.toolName} is not supported`
-                    });
-                    break;
-                  }
-                  const webSearchOutput = webSearch_20250305OutputSchema2.parse(output.value);
-                  anthropicContent.push({
-                    type: "web_search_tool_result",
-                    tool_use_id: part.toolCallId,
-                    content: webSearchOutput.map((result) => ({
-                      url: result.url,
-                      title: result.title,
-                      page_age: result.pageAge,
-                      encrypted_content: result.encryptedContent,
-                      type: result.type
-                    })),
-                    cache_control: cacheControl
-                  });
-                  break;
-                }
-                warnings.push({
-                  type: "other",
-                  message: `provider executed tool result for tool ${part.toolName} is not supported`
-                });
-                break;
-              }
-            }
-          }
-        }
-        messages.push({ role: "assistant", content: anthropicContent });
-        break;
-      }
-      default: {
-        const _exhaustiveCheck = type;
-        throw new Error(`content type: ${_exhaustiveCheck}`);
-      }
-    }
-  }
-  return {
-    prompt: { system, messages },
-    betas
-  };
-}
-function groupIntoBlocks2(prompt) {
-  const blocks = [];
-  let currentBlock = undefined;
-  for (const message of prompt) {
-    const { role } = message;
-    switch (role) {
-      case "system": {
-        if ((currentBlock == null ? undefined : currentBlock.type) !== "system") {
-          currentBlock = { type: "system", messages: [] };
-          blocks.push(currentBlock);
-        }
-        currentBlock.messages.push(message);
-        break;
-      }
-      case "assistant": {
-        if ((currentBlock == null ? undefined : currentBlock.type) !== "assistant") {
-          currentBlock = { type: "assistant", messages: [] };
-          blocks.push(currentBlock);
-        }
-        currentBlock.messages.push(message);
-        break;
-      }
-      case "user": {
-        if ((currentBlock == null ? undefined : currentBlock.type) !== "user") {
-          currentBlock = { type: "user", messages: [] };
-          blocks.push(currentBlock);
-        }
-        currentBlock.messages.push(message);
-        break;
-      }
-      case "tool": {
-        if ((currentBlock == null ? undefined : currentBlock.type) !== "user") {
-          currentBlock = { type: "user", messages: [] };
-          blocks.push(currentBlock);
-        }
-        currentBlock.messages.push(message);
-        break;
-      }
-      default: {
-        const _exhaustiveCheck = role;
-        throw new Error(`Unsupported role: ${_exhaustiveCheck}`);
-      }
-    }
-  }
-  return blocks;
-}
-function mapAnthropicStopReason2({
-  finishReason,
-  isJsonResponseFromTool
-}) {
-  switch (finishReason) {
-    case "end_turn":
-    case "stop_sequence":
-      return "stop";
-    case "tool_use":
-      return isJsonResponseFromTool ? "stop" : "tool-calls";
-    case "max_tokens":
-      return "length";
-    default:
-      return "unknown";
-  }
-}
-var citationSchemas2 = {
-  webSearchResult: exports_external.object({
-    type: exports_external.literal("web_search_result_location"),
-    cited_text: exports_external.string(),
-    url: exports_external.string(),
-    title: exports_external.string(),
-    encrypted_index: exports_external.string()
-  }),
-  pageLocation: exports_external.object({
-    type: exports_external.literal("page_location"),
-    cited_text: exports_external.string(),
-    document_index: exports_external.number(),
-    document_title: exports_external.string().nullable(),
-    start_page_number: exports_external.number(),
-    end_page_number: exports_external.number()
-  }),
-  charLocation: exports_external.object({
-    type: exports_external.literal("char_location"),
-    cited_text: exports_external.string(),
-    document_index: exports_external.number(),
-    document_title: exports_external.string().nullable(),
-    start_char_index: exports_external.number(),
-    end_char_index: exports_external.number()
-  })
-};
-var citationSchema2 = exports_external.discriminatedUnion("type", [
-  citationSchemas2.webSearchResult,
-  citationSchemas2.pageLocation,
-  citationSchemas2.charLocation
-]);
-var documentCitationSchema2 = exports_external.discriminatedUnion("type", [
-  citationSchemas2.pageLocation,
-  citationSchemas2.charLocation
-]);
-function processCitation2(citation, citationDocuments, generateId32, onSource) {
-  if (citation.type === "page_location" || citation.type === "char_location") {
-    const source = createCitationSource2(citation, citationDocuments, generateId32);
-    if (source) {
-      onSource(source);
-    }
-  }
-}
-function createCitationSource2(citation, citationDocuments, generateId32) {
-  var _a16;
-  const documentInfo = citationDocuments[citation.document_index];
-  if (!documentInfo) {
-    return null;
-  }
-  const providerMetadata = citation.type === "page_location" ? {
-    citedText: citation.cited_text,
-    startPageNumber: citation.start_page_number,
-    endPageNumber: citation.end_page_number
-  } : {
-    citedText: citation.cited_text,
-    startCharIndex: citation.start_char_index,
-    endCharIndex: citation.end_char_index
-  };
-  return {
-    type: "source",
-    sourceType: "document",
-    id: generateId32(),
-    mediaType: documentInfo.mediaType,
-    title: (_a16 = citation.document_title) != null ? _a16 : documentInfo.title,
-    filename: documentInfo.filename,
-    providerMetadata: {
-      anthropic: providerMetadata
-    }
-  };
-}
-var AnthropicMessagesLanguageModel2 = class {
-  constructor(modelId, config2) {
-    this.specificationVersion = "v2";
-    var _a16;
-    this.modelId = modelId;
-    this.config = config2;
-    this.generateId = (_a16 = config2.generateId) != null ? _a16 : generateId;
-  }
-  supportsUrl(url2) {
-    return url2.protocol === "https:";
-  }
-  get provider() {
-    return this.config.provider;
-  }
-  get supportedUrls() {
-    var _a16, _b16, _c;
-    return (_c = (_b16 = (_a16 = this.config).supportedUrls) == null ? undefined : _b16.call(_a16)) != null ? _c : {};
-  }
-  async getArgs({
-    prompt,
-    maxOutputTokens = 4096,
-    temperature,
-    topP,
-    topK,
-    frequencyPenalty,
-    presencePenalty,
-    stopSequences,
-    responseFormat,
-    seed,
-    tools,
-    toolChoice,
-    providerOptions
-  }) {
-    var _a16, _b16, _c;
-    const warnings = [];
-    if (frequencyPenalty != null) {
-      warnings.push({
-        type: "unsupported-setting",
-        setting: "frequencyPenalty"
-      });
-    }
-    if (presencePenalty != null) {
-      warnings.push({
-        type: "unsupported-setting",
-        setting: "presencePenalty"
-      });
-    }
-    if (seed != null) {
-      warnings.push({
-        type: "unsupported-setting",
-        setting: "seed"
-      });
-    }
-    if ((responseFormat == null ? undefined : responseFormat.type) === "json") {
-      if (responseFormat.schema == null) {
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "responseFormat",
-          details: "JSON response format requires a schema. The response format is ignored."
-        });
-      } else if (tools != null) {
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "tools",
-          details: "JSON response format does not support tools. The provided tools are ignored."
-        });
-      }
-    }
-    const jsonResponseTool = (responseFormat == null ? undefined : responseFormat.type) === "json" && responseFormat.schema != null ? {
-      type: "function",
-      name: "json",
-      description: "Respond with a JSON object.",
-      inputSchema: responseFormat.schema
-    } : undefined;
-    const anthropicOptions = await parseProviderOptions({
-      provider: "anthropic",
-      providerOptions,
-      schema: anthropicProviderOptions2
-    });
-    const { prompt: messagesPrompt, betas: messagesBetas } = await convertToAnthropicMessagesPrompt2({
-      prompt,
-      sendReasoning: (_a16 = anthropicOptions == null ? undefined : anthropicOptions.sendReasoning) != null ? _a16 : true,
-      warnings
-    });
-    const isThinking = ((_b16 = anthropicOptions == null ? undefined : anthropicOptions.thinking) == null ? undefined : _b16.type) === "enabled";
-    const thinkingBudget = (_c = anthropicOptions == null ? undefined : anthropicOptions.thinking) == null ? undefined : _c.budgetTokens;
-    const baseArgs = {
-      model: this.modelId,
-      max_tokens: maxOutputTokens,
-      temperature,
-      top_k: topK,
-      top_p: topP,
-      stop_sequences: stopSequences,
-      ...isThinking && {
-        thinking: { type: "enabled", budget_tokens: thinkingBudget }
-      },
-      system: messagesPrompt.system,
-      messages: messagesPrompt.messages
-    };
-    if (isThinking) {
-      if (thinkingBudget == null) {
-        throw new UnsupportedFunctionalityError({
-          functionality: "thinking requires a budget"
-        });
-      }
-      if (baseArgs.temperature != null) {
-        baseArgs.temperature = undefined;
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "temperature",
-          details: "temperature is not supported when thinking is enabled"
-        });
-      }
-      if (topK != null) {
-        baseArgs.top_k = undefined;
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "topK",
-          details: "topK is not supported when thinking is enabled"
-        });
-      }
-      if (topP != null) {
-        baseArgs.top_p = undefined;
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "topP",
-          details: "topP is not supported when thinking is enabled"
-        });
-      }
-      baseArgs.max_tokens = maxOutputTokens + thinkingBudget;
-    }
-    const {
-      tools: anthropicTools2,
-      toolChoice: anthropicToolChoice,
-      toolWarnings,
-      betas: toolsBetas
-    } = prepareTools3(jsonResponseTool != null ? {
-      tools: [jsonResponseTool],
-      toolChoice: { type: "tool", toolName: jsonResponseTool.name },
-      disableParallelToolUse: anthropicOptions == null ? undefined : anthropicOptions.disableParallelToolUse
-    } : {
-      tools: tools != null ? tools : [],
-      toolChoice,
-      disableParallelToolUse: anthropicOptions == null ? undefined : anthropicOptions.disableParallelToolUse
-    });
-    return {
-      args: {
-        ...baseArgs,
-        tools: anthropicTools2,
-        tool_choice: anthropicToolChoice
-      },
-      warnings: [...warnings, ...toolWarnings],
-      betas: /* @__PURE__ */ new Set([...messagesBetas, ...toolsBetas]),
-      usesJsonResponseTool: jsonResponseTool != null
-    };
-  }
-  async getHeaders({
-    betas,
-    headers
-  }) {
-    return combineHeaders(await resolve(this.config.headers), betas.size > 0 ? { "anthropic-beta": Array.from(betas).join(",") } : {}, headers);
-  }
-  buildRequestUrl(isStreaming) {
-    var _a16, _b16, _c;
-    return (_c = (_b16 = (_a16 = this.config).buildRequestUrl) == null ? undefined : _b16.call(_a16, this.config.baseURL, isStreaming)) != null ? _c : `${this.config.baseURL}/messages`;
-  }
-  transformRequestBody(args) {
-    var _a16, _b16, _c;
-    return (_c = (_b16 = (_a16 = this.config).transformRequestBody) == null ? undefined : _b16.call(_a16, args)) != null ? _c : args;
-  }
-  extractCitationDocuments(prompt) {
-    const isCitationPart = (part) => {
-      var _a16, _b16;
-      if (part.type !== "file") {
-        return false;
-      }
-      if (part.mediaType !== "application/pdf" && part.mediaType !== "text/plain") {
-        return false;
-      }
-      const anthropic2 = (_a16 = part.providerOptions) == null ? undefined : _a16.anthropic;
-      const citationsConfig = anthropic2 == null ? undefined : anthropic2.citations;
-      return (_b16 = citationsConfig == null ? undefined : citationsConfig.enabled) != null ? _b16 : false;
-    };
-    return prompt.filter((message) => message.role === "user").flatMap((message) => message.content).filter(isCitationPart).map((part) => {
-      var _a16;
-      const filePart = part;
-      return {
-        title: (_a16 = filePart.filename) != null ? _a16 : "Untitled Document",
-        filename: filePart.filename,
-        mediaType: filePart.mediaType
-      };
-    });
-  }
-  async doGenerate(options) {
-    var _a16, _b16, _c, _d, _e;
-    const { args, warnings, betas, usesJsonResponseTool } = await this.getArgs(options);
-    const citationDocuments = this.extractCitationDocuments(options.prompt);
-    const {
-      responseHeaders,
-      value: response,
-      rawValue: rawResponse
-    } = await postJsonToApi({
-      url: this.buildRequestUrl(false),
-      headers: await this.getHeaders({ betas, headers: options.headers }),
-      body: this.transformRequestBody(args),
-      failedResponseHandler: anthropicFailedResponseHandler2,
-      successfulResponseHandler: createJsonResponseHandler(anthropicMessagesResponseSchema2),
-      abortSignal: options.abortSignal,
-      fetch: this.config.fetch
-    });
-    const content = [];
-    for (const part of response.content) {
-      switch (part.type) {
-        case "text": {
-          if (!usesJsonResponseTool) {
-            content.push({ type: "text", text: part.text });
-            if (part.citations) {
-              for (const citation of part.citations) {
-                processCitation2(citation, citationDocuments, this.generateId, (source) => content.push(source));
-              }
-            }
-          }
-          break;
-        }
-        case "thinking": {
-          content.push({
-            type: "reasoning",
-            text: part.thinking,
-            providerMetadata: {
-              anthropic: {
-                signature: part.signature
-              }
-            }
-          });
-          break;
-        }
-        case "redacted_thinking": {
-          content.push({
-            type: "reasoning",
-            text: "",
-            providerMetadata: {
-              anthropic: {
-                redactedData: part.data
-              }
-            }
-          });
-          break;
-        }
-        case "tool_use": {
-          content.push(usesJsonResponseTool ? {
-            type: "text",
-            text: JSON.stringify(part.input)
-          } : {
-            type: "tool-call",
-            toolCallId: part.id,
-            toolName: part.name,
-            input: JSON.stringify(part.input)
-          });
-          break;
-        }
-        case "server_tool_use": {
-          if (part.name === "web_search") {
-            content.push({
-              type: "tool-call",
-              toolCallId: part.id,
-              toolName: part.name,
-              input: JSON.stringify(part.input),
-              providerExecuted: true
-            });
-          }
-          break;
-        }
-        case "web_search_tool_result": {
-          if (Array.isArray(part.content)) {
-            content.push({
-              type: "tool-result",
-              toolCallId: part.tool_use_id,
-              toolName: "web_search",
-              result: part.content.map((result) => {
-                var _a26;
-                return {
-                  url: result.url,
-                  title: result.title,
-                  pageAge: (_a26 = result.page_age) != null ? _a26 : null,
-                  encryptedContent: result.encrypted_content,
-                  type: result.type
-                };
-              }),
-              providerExecuted: true
-            });
-            for (const result of part.content) {
-              content.push({
-                type: "source",
-                sourceType: "url",
-                id: this.generateId(),
-                url: result.url,
-                title: result.title,
-                providerMetadata: {
-                  anthropic: {
-                    pageAge: (_a16 = result.page_age) != null ? _a16 : null
-                  }
-                }
-              });
-            }
-          } else {
-            content.push({
-              type: "tool-result",
-              toolCallId: part.tool_use_id,
-              toolName: "web_search",
-              isError: true,
-              result: {
-                type: "web_search_tool_result_error",
-                errorCode: part.content.error_code
-              },
-              providerExecuted: true
-            });
-          }
-          break;
-        }
-      }
-    }
-    return {
-      content,
-      finishReason: mapAnthropicStopReason2({
-        finishReason: response.stop_reason,
-        isJsonResponseFromTool: usesJsonResponseTool
-      }),
-      usage: {
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
-        totalTokens: response.usage.input_tokens + response.usage.output_tokens,
-        cachedInputTokens: (_b16 = response.usage.cache_read_input_tokens) != null ? _b16 : undefined
-      },
-      request: { body: args },
-      response: {
-        id: (_c = response.id) != null ? _c : undefined,
-        modelId: (_d = response.model) != null ? _d : undefined,
-        headers: responseHeaders,
-        body: rawResponse
-      },
-      warnings,
-      providerMetadata: {
-        anthropic: {
-          usage: response.usage,
-          cacheCreationInputTokens: (_e = response.usage.cache_creation_input_tokens) != null ? _e : null
-        }
-      }
-    };
-  }
-  async doStream(options) {
-    const { args, warnings, betas, usesJsonResponseTool } = await this.getArgs(options);
-    const citationDocuments = this.extractCitationDocuments(options.prompt);
-    const body = { ...args, stream: true };
-    const { responseHeaders, value: response } = await postJsonToApi({
-      url: this.buildRequestUrl(true),
-      headers: await this.getHeaders({ betas, headers: options.headers }),
-      body: this.transformRequestBody(body),
-      failedResponseHandler: anthropicFailedResponseHandler2,
-      successfulResponseHandler: createEventSourceResponseHandler(anthropicMessagesChunkSchema2),
-      abortSignal: options.abortSignal,
-      fetch: this.config.fetch
-    });
-    let finishReason = "unknown";
-    const usage = {
-      inputTokens: undefined,
-      outputTokens: undefined,
-      totalTokens: undefined
-    };
-    const contentBlocks = {};
-    let providerMetadata = undefined;
-    let blockType = undefined;
-    const generateId32 = this.generateId;
-    return {
-      stream: response.pipeThrough(new TransformStream({
-        start(controller) {
-          controller.enqueue({ type: "stream-start", warnings });
-        },
-        transform(chunk, controller) {
-          var _a16, _b16, _c, _d, _e, _f, _g;
-          if (options.includeRawChunks) {
-            controller.enqueue({ type: "raw", rawValue: chunk.rawValue });
-          }
-          if (!chunk.success) {
-            controller.enqueue({ type: "error", error: chunk.error });
-            return;
-          }
-          const value = chunk.value;
-          switch (value.type) {
-            case "ping": {
-              return;
-            }
-            case "content_block_start": {
-              const contentBlockType = value.content_block.type;
-              blockType = contentBlockType;
-              switch (contentBlockType) {
-                case "text": {
-                  contentBlocks[value.index] = { type: "text" };
-                  controller.enqueue({
-                    type: "text-start",
-                    id: String(value.index)
-                  });
-                  return;
-                }
-                case "thinking": {
-                  contentBlocks[value.index] = { type: "reasoning" };
-                  controller.enqueue({
-                    type: "reasoning-start",
-                    id: String(value.index)
-                  });
-                  return;
-                }
-                case "redacted_thinking": {
-                  contentBlocks[value.index] = { type: "reasoning" };
-                  controller.enqueue({
-                    type: "reasoning-start",
-                    id: String(value.index),
-                    providerMetadata: {
-                      anthropic: {
-                        redactedData: value.content_block.data
-                      }
-                    }
-                  });
-                  return;
-                }
-                case "tool_use": {
-                  contentBlocks[value.index] = usesJsonResponseTool ? { type: "text" } : {
-                    type: "tool-call",
-                    toolCallId: value.content_block.id,
-                    toolName: value.content_block.name,
-                    input: ""
-                  };
-                  controller.enqueue(usesJsonResponseTool ? { type: "text-start", id: String(value.index) } : {
-                    type: "tool-input-start",
-                    id: value.content_block.id,
-                    toolName: value.content_block.name
-                  });
-                  return;
-                }
-                case "server_tool_use": {
-                  if (value.content_block.name === "web_search") {
-                    contentBlocks[value.index] = {
-                      type: "tool-call",
-                      toolCallId: value.content_block.id,
-                      toolName: value.content_block.name,
-                      input: "",
-                      providerExecuted: true
-                    };
-                    controller.enqueue({
-                      type: "tool-input-start",
-                      id: value.content_block.id,
-                      toolName: value.content_block.name,
-                      providerExecuted: true
-                    });
-                  }
-                  return;
-                }
-                case "web_search_tool_result": {
-                  const part = value.content_block;
-                  if (Array.isArray(part.content)) {
-                    controller.enqueue({
-                      type: "tool-result",
-                      toolCallId: part.tool_use_id,
-                      toolName: "web_search",
-                      result: part.content.map((result) => {
-                        var _a26;
-                        return {
-                          url: result.url,
-                          title: result.title,
-                          pageAge: (_a26 = result.page_age) != null ? _a26 : null,
-                          encryptedContent: result.encrypted_content,
-                          type: result.type
-                        };
-                      }),
-                      providerExecuted: true
-                    });
-                    for (const result of part.content) {
-                      controller.enqueue({
-                        type: "source",
-                        sourceType: "url",
-                        id: generateId32(),
-                        url: result.url,
-                        title: result.title,
-                        providerMetadata: {
-                          anthropic: {
-                            pageAge: (_a16 = result.page_age) != null ? _a16 : null
-                          }
-                        }
-                      });
-                    }
-                  } else {
-                    controller.enqueue({
-                      type: "tool-result",
-                      toolCallId: part.tool_use_id,
-                      toolName: "web_search",
-                      isError: true,
-                      result: {
-                        type: "web_search_tool_result_error",
-                        errorCode: part.content.error_code
-                      },
-                      providerExecuted: true
-                    });
-                  }
-                  return;
-                }
-                default: {
-                  const _exhaustiveCheck = contentBlockType;
-                  throw new Error(`Unsupported content block type: ${_exhaustiveCheck}`);
-                }
-              }
-            }
-            case "content_block_stop": {
-              if (contentBlocks[value.index] != null) {
-                const contentBlock = contentBlocks[value.index];
-                switch (contentBlock.type) {
-                  case "text": {
-                    controller.enqueue({
-                      type: "text-end",
-                      id: String(value.index)
-                    });
-                    break;
-                  }
-                  case "reasoning": {
-                    controller.enqueue({
-                      type: "reasoning-end",
-                      id: String(value.index)
-                    });
-                    break;
-                  }
-                  case "tool-call":
-                    if (!usesJsonResponseTool) {
-                      controller.enqueue({
-                        type: "tool-input-end",
-                        id: contentBlock.toolCallId
-                      });
-                      controller.enqueue(contentBlock);
-                    }
-                    break;
-                }
-                delete contentBlocks[value.index];
-              }
-              blockType = undefined;
-              return;
-            }
-            case "content_block_delta": {
-              const deltaType = value.delta.type;
-              switch (deltaType) {
-                case "text_delta": {
-                  if (usesJsonResponseTool) {
-                    return;
-                  }
-                  controller.enqueue({
-                    type: "text-delta",
-                    id: String(value.index),
-                    delta: value.delta.text
-                  });
-                  return;
-                }
-                case "thinking_delta": {
-                  controller.enqueue({
-                    type: "reasoning-delta",
-                    id: String(value.index),
-                    delta: value.delta.thinking
-                  });
-                  return;
-                }
-                case "signature_delta": {
-                  if (blockType === "thinking") {
-                    controller.enqueue({
-                      type: "reasoning-delta",
-                      id: String(value.index),
-                      delta: "",
-                      providerMetadata: {
-                        anthropic: {
-                          signature: value.delta.signature
-                        }
-                      }
-                    });
-                  }
-                  return;
-                }
-                case "input_json_delta": {
-                  const contentBlock = contentBlocks[value.index];
-                  const delta = value.delta.partial_json;
-                  if (usesJsonResponseTool) {
-                    if ((contentBlock == null ? undefined : contentBlock.type) !== "text") {
-                      return;
-                    }
-                    controller.enqueue({
-                      type: "text-delta",
-                      id: String(value.index),
-                      delta
-                    });
-                  } else {
-                    if ((contentBlock == null ? undefined : contentBlock.type) !== "tool-call") {
-                      return;
-                    }
-                    controller.enqueue({
-                      type: "tool-input-delta",
-                      id: contentBlock.toolCallId,
-                      delta
-                    });
-                    contentBlock.input += delta;
-                  }
-                  return;
-                }
-                case "citations_delta": {
-                  const citation = value.delta.citation;
-                  processCitation2(citation, citationDocuments, generateId32, (source) => controller.enqueue(source));
-                  return;
-                }
-                default: {
-                  const _exhaustiveCheck = deltaType;
-                  throw new Error(`Unsupported delta type: ${_exhaustiveCheck}`);
-                }
-              }
-            }
-            case "message_start": {
-              usage.inputTokens = value.message.usage.input_tokens;
-              usage.cachedInputTokens = (_b16 = value.message.usage.cache_read_input_tokens) != null ? _b16 : undefined;
-              providerMetadata = {
-                anthropic: {
-                  usage: value.message.usage,
-                  cacheCreationInputTokens: (_c = value.message.usage.cache_creation_input_tokens) != null ? _c : null
-                }
-              };
-              controller.enqueue({
-                type: "response-metadata",
-                id: (_d = value.message.id) != null ? _d : undefined,
-                modelId: (_e = value.message.model) != null ? _e : undefined
-              });
-              return;
-            }
-            case "message_delta": {
-              usage.outputTokens = value.usage.output_tokens;
-              usage.totalTokens = ((_f = usage.inputTokens) != null ? _f : 0) + ((_g = value.usage.output_tokens) != null ? _g : 0);
-              finishReason = mapAnthropicStopReason2({
-                finishReason: value.delta.stop_reason,
-                isJsonResponseFromTool: usesJsonResponseTool
-              });
-              return;
-            }
-            case "message_stop": {
-              controller.enqueue({
-                type: "finish",
-                finishReason,
-                usage,
-                providerMetadata
-              });
-              return;
-            }
-            case "error": {
-              controller.enqueue({ type: "error", error: value.error });
-              return;
-            }
-            default: {
-              const _exhaustiveCheck = value;
-              throw new Error(`Unsupported chunk type: ${_exhaustiveCheck}`);
-            }
-          }
-        }
-      })),
-      request: { body },
-      response: { headers: responseHeaders }
-    };
-  }
-};
-var anthropicMessagesResponseSchema2 = exports_external.object({
-  type: exports_external.literal("message"),
-  id: exports_external.string().nullish(),
-  model: exports_external.string().nullish(),
-  content: exports_external.array(exports_external.discriminatedUnion("type", [
-    exports_external.object({
-      type: exports_external.literal("text"),
-      text: exports_external.string(),
-      citations: exports_external.array(citationSchema2).optional()
-    }),
-    exports_external.object({
-      type: exports_external.literal("thinking"),
-      thinking: exports_external.string(),
-      signature: exports_external.string()
-    }),
-    exports_external.object({
-      type: exports_external.literal("redacted_thinking"),
-      data: exports_external.string()
-    }),
-    exports_external.object({
-      type: exports_external.literal("tool_use"),
-      id: exports_external.string(),
-      name: exports_external.string(),
-      input: exports_external.unknown()
-    }),
-    exports_external.object({
-      type: exports_external.literal("server_tool_use"),
-      id: exports_external.string(),
-      name: exports_external.string(),
-      input: exports_external.record(exports_external.string(), exports_external.unknown()).nullish()
-    }),
-    exports_external.object({
-      type: exports_external.literal("web_search_tool_result"),
-      tool_use_id: exports_external.string(),
-      content: exports_external.union([
-        exports_external.array(exports_external.object({
-          type: exports_external.literal("web_search_result"),
-          url: exports_external.string(),
-          title: exports_external.string(),
-          encrypted_content: exports_external.string(),
-          page_age: exports_external.string().nullish()
-        })),
-        exports_external.object({
-          type: exports_external.literal("web_search_tool_result_error"),
-          error_code: exports_external.string()
-        })
-      ])
-    })
-  ])),
-  stop_reason: exports_external.string().nullish(),
-  usage: exports_external.looseObject({
-    input_tokens: exports_external.number(),
-    output_tokens: exports_external.number(),
-    cache_creation_input_tokens: exports_external.number().nullish(),
-    cache_read_input_tokens: exports_external.number().nullish()
-  })
-});
-var anthropicMessagesChunkSchema2 = exports_external.discriminatedUnion("type", [
-  exports_external.object({
-    type: exports_external.literal("message_start"),
-    message: exports_external.object({
-      id: exports_external.string().nullish(),
-      model: exports_external.string().nullish(),
-      usage: exports_external.looseObject({
-        input_tokens: exports_external.number(),
-        output_tokens: exports_external.number(),
-        cache_creation_input_tokens: exports_external.number().nullish(),
-        cache_read_input_tokens: exports_external.number().nullish()
-      })
-    })
-  }),
-  exports_external.object({
-    type: exports_external.literal("content_block_start"),
-    index: exports_external.number(),
-    content_block: exports_external.discriminatedUnion("type", [
-      exports_external.object({
-        type: exports_external.literal("text"),
-        text: exports_external.string()
-      }),
-      exports_external.object({
-        type: exports_external.literal("thinking"),
-        thinking: exports_external.string()
-      }),
-      exports_external.object({
-        type: exports_external.literal("tool_use"),
-        id: exports_external.string(),
-        name: exports_external.string()
-      }),
-      exports_external.object({
-        type: exports_external.literal("redacted_thinking"),
-        data: exports_external.string()
-      }),
-      exports_external.object({
-        type: exports_external.literal("server_tool_use"),
-        id: exports_external.string(),
-        name: exports_external.string(),
-        input: exports_external.record(exports_external.string(), exports_external.unknown()).nullish()
-      }),
-      exports_external.object({
-        type: exports_external.literal("web_search_tool_result"),
-        tool_use_id: exports_external.string(),
-        content: exports_external.union([
-          exports_external.array(exports_external.object({
-            type: exports_external.literal("web_search_result"),
-            url: exports_external.string(),
-            title: exports_external.string(),
-            encrypted_content: exports_external.string(),
-            page_age: exports_external.string().nullish()
-          })),
-          exports_external.object({
-            type: exports_external.literal("web_search_tool_result_error"),
-            error_code: exports_external.string()
-          })
-        ])
-      })
-    ])
-  }),
-  exports_external.object({
-    type: exports_external.literal("content_block_delta"),
-    index: exports_external.number(),
-    delta: exports_external.discriminatedUnion("type", [
-      exports_external.object({
-        type: exports_external.literal("input_json_delta"),
-        partial_json: exports_external.string()
-      }),
-      exports_external.object({
-        type: exports_external.literal("text_delta"),
-        text: exports_external.string()
-      }),
-      exports_external.object({
-        type: exports_external.literal("thinking_delta"),
-        thinking: exports_external.string()
-      }),
-      exports_external.object({
-        type: exports_external.literal("signature_delta"),
-        signature: exports_external.string()
-      }),
-      exports_external.object({
-        type: exports_external.literal("citations_delta"),
-        citation: citationSchema2
-      })
-    ])
-  }),
-  exports_external.object({
-    type: exports_external.literal("content_block_stop"),
-    index: exports_external.number()
-  }),
-  exports_external.object({
-    type: exports_external.literal("error"),
-    error: exports_external.object({
-      type: exports_external.string(),
-      message: exports_external.string()
-    })
-  }),
-  exports_external.object({
-    type: exports_external.literal("message_delta"),
-    delta: exports_external.object({ stop_reason: exports_external.string().nullish() }),
-    usage: exports_external.object({ output_tokens: exports_external.number() })
-  }),
-  exports_external.object({
-    type: exports_external.literal("message_stop")
-  }),
-  exports_external.object({
-    type: exports_external.literal("ping")
-  })
-]);
-var anthropicReasoningMetadataSchema2 = exports_external.object({
-  signature: exports_external.string().optional(),
-  redactedData: exports_external.string().optional()
-});
-var bash_202410222 = createProviderDefinedToolFactory({
-  id: "anthropic.bash_20241022",
-  name: "bash",
-  inputSchema: v4_default.object({
-    command: v4_default.string(),
-    restart: v4_default.boolean().optional()
-  })
-});
-var bash_202501242 = createProviderDefinedToolFactory({
-  id: "anthropic.bash_20250124",
-  name: "bash",
-  inputSchema: v4_default.object({
-    command: v4_default.string(),
-    restart: v4_default.boolean().optional()
-  })
-});
-var computer_202410222 = createProviderDefinedToolFactory({
-  id: "anthropic.computer_20241022",
-  name: "computer",
-  inputSchema: exports_external.object({
-    action: exports_external.enum([
-      "key",
-      "type",
-      "mouse_move",
-      "left_click",
-      "left_click_drag",
-      "right_click",
-      "middle_click",
-      "double_click",
-      "screenshot",
-      "cursor_position"
-    ]),
-    coordinate: exports_external.array(exports_external.number().int()).optional(),
-    text: exports_external.string().optional()
-  })
-});
-var computer_202501242 = createProviderDefinedToolFactory({
-  id: "anthropic.computer_20250124",
-  name: "computer",
-  inputSchema: exports_external.object({
-    action: exports_external.enum([
-      "key",
-      "hold_key",
-      "type",
-      "cursor_position",
-      "mouse_move",
-      "left_mouse_down",
-      "left_mouse_up",
-      "left_click",
-      "left_click_drag",
-      "right_click",
-      "middle_click",
-      "double_click",
-      "triple_click",
-      "scroll",
-      "wait",
-      "screenshot"
-    ]),
-    coordinate: exports_external.tuple([exports_external.number().int(), exports_external.number().int()]).optional(),
-    duration: exports_external.number().optional(),
-    scroll_amount: exports_external.number().optional(),
-    scroll_direction: exports_external.enum(["up", "down", "left", "right"]).optional(),
-    start_coordinate: exports_external.tuple([exports_external.number().int(), exports_external.number().int()]).optional(),
-    text: exports_external.string().optional()
-  })
-});
-var textEditor_202410222 = createProviderDefinedToolFactory({
-  id: "anthropic.text_editor_20241022",
-  name: "str_replace_editor",
-  inputSchema: exports_external.object({
-    command: exports_external.enum(["view", "create", "str_replace", "insert", "undo_edit"]),
-    path: exports_external.string(),
-    file_text: exports_external.string().optional(),
-    insert_line: exports_external.number().int().optional(),
-    new_str: exports_external.string().optional(),
-    old_str: exports_external.string().optional(),
-    view_range: exports_external.array(exports_external.number().int()).optional()
-  })
-});
-var textEditor_202501242 = createProviderDefinedToolFactory({
-  id: "anthropic.text_editor_20250124",
-  name: "str_replace_editor",
-  inputSchema: exports_external.object({
-    command: exports_external.enum(["view", "create", "str_replace", "insert", "undo_edit"]),
-    path: exports_external.string(),
-    file_text: exports_external.string().optional(),
-    insert_line: exports_external.number().int().optional(),
-    new_str: exports_external.string().optional(),
-    old_str: exports_external.string().optional(),
-    view_range: exports_external.array(exports_external.number().int()).optional()
-  })
-});
-var textEditor_202504292 = createProviderDefinedToolFactory({
-  id: "anthropic.text_editor_20250429",
-  name: "str_replace_based_edit_tool",
-  inputSchema: exports_external.object({
-    command: exports_external.enum(["view", "create", "str_replace", "insert"]),
-    path: exports_external.string(),
-    file_text: exports_external.string().optional(),
-    insert_line: exports_external.number().int().optional(),
-    new_str: exports_external.string().optional(),
-    old_str: exports_external.string().optional(),
-    view_range: exports_external.array(exports_external.number().int()).optional()
-  })
-});
-var anthropicTools2 = {
-  bash_20241022: bash_202410222,
-  bash_20250124: bash_202501242,
-  textEditor_20241022: textEditor_202410222,
-  textEditor_20250124: textEditor_202501242,
-  textEditor_20250429: textEditor_202504292,
-  computer_20241022: computer_202410222,
-  computer_20250124: computer_202501242,
-  webSearch_20250305: webSearch_202503052
-};
-function createAnthropic2(options = {}) {
-  var _a16;
-  const baseURL = (_a16 = withoutTrailingSlash(options.baseURL)) != null ? _a16 : "https://api.anthropic.com/v1";
-  const getHeaders = () => ({
-    "anthropic-version": "2023-06-01",
-    "x-api-key": loadApiKey({
-      apiKey: options.apiKey,
-      environmentVariableName: "ANTHROPIC_API_KEY",
-      description: "Anthropic"
-    }),
-    ...options.headers
-  });
-  const createChatModel = (modelId) => {
-    var _a26;
-    return new AnthropicMessagesLanguageModel2(modelId, {
-      provider: "anthropic.messages",
-      baseURL,
-      headers: getHeaders,
-      fetch: options.fetch,
-      generateId: (_a26 = options.generateId) != null ? _a26 : generateId,
-      supportedUrls: () => ({
-        "image/*": [/^https?:\/\/.*$/]
-      })
-    });
-  };
-  const provider = function(modelId) {
-    if (new.target) {
-      throw new Error("The Anthropic model function cannot be called with the new keyword.");
-    }
-    return createChatModel(modelId);
-  };
-  provider.languageModel = createChatModel;
-  provider.chat = createChatModel;
-  provider.messages = createChatModel;
-  provider.textEmbeddingModel = (modelId) => {
-    throw new NoSuchModelError({ modelId, modelType: "textEmbeddingModel" });
-  };
-  provider.imageModel = (modelId) => {
-    throw new NoSuchModelError({ modelId, modelType: "imageModel" });
-  };
-  provider.tools = anthropicTools2;
-  return provider;
-}
-var anthropic2 = createAnthropic2();
-
-// ../../node_modules/@ai-sdk/openai/dist/index.mjs
-function convertToOpenAIChatMessages2({
-  prompt,
-  systemMessageMode = "system"
-}) {
-  const messages = [];
-  const warnings = [];
-  for (const { role, content } of prompt) {
-    switch (role) {
-      case "system": {
-        switch (systemMessageMode) {
-          case "system": {
-            messages.push({ role: "system", content });
-            break;
-          }
-          case "developer": {
-            messages.push({ role: "developer", content });
-            break;
-          }
-          case "remove": {
-            warnings.push({
-              type: "other",
-              message: "system messages are removed for this model"
-            });
-            break;
-          }
-          default: {
-            const _exhaustiveCheck = systemMessageMode;
-            throw new Error(`Unsupported system message mode: ${_exhaustiveCheck}`);
-          }
-        }
-        break;
-      }
-      case "user": {
-        if (content.length === 1 && content[0].type === "text") {
-          messages.push({ role: "user", content: content[0].text });
-          break;
-        }
-        messages.push({
-          role: "user",
-          content: content.map((part, index) => {
-            var _a16, _b16, _c;
-            switch (part.type) {
-              case "text": {
-                return { type: "text", text: part.text };
-              }
-              case "file": {
-                if (part.mediaType.startsWith("image/")) {
-                  const mediaType = part.mediaType === "image/*" ? "image/jpeg" : part.mediaType;
-                  return {
-                    type: "image_url",
-                    image_url: {
-                      url: part.data instanceof URL ? part.data.toString() : `data:${mediaType};base64,${convertToBase64(part.data)}`,
-                      detail: (_b16 = (_a16 = part.providerOptions) == null ? undefined : _a16.openai) == null ? undefined : _b16.imageDetail
-                    }
-                  };
-                } else if (part.mediaType.startsWith("audio/")) {
-                  if (part.data instanceof URL) {
-                    throw new UnsupportedFunctionalityError({
-                      functionality: "audio file parts with URLs"
-                    });
-                  }
-                  switch (part.mediaType) {
-                    case "audio/wav": {
-                      return {
-                        type: "input_audio",
-                        input_audio: {
-                          data: convertToBase64(part.data),
-                          format: "wav"
-                        }
-                      };
-                    }
-                    case "audio/mp3":
-                    case "audio/mpeg": {
-                      return {
-                        type: "input_audio",
-                        input_audio: {
-                          data: convertToBase64(part.data),
-                          format: "mp3"
-                        }
-                      };
-                    }
-                    default: {
-                      throw new UnsupportedFunctionalityError({
-                        functionality: `audio content parts with media type ${part.mediaType}`
-                      });
-                    }
-                  }
-                } else if (part.mediaType === "application/pdf") {
-                  if (part.data instanceof URL) {
-                    throw new UnsupportedFunctionalityError({
-                      functionality: "PDF file parts with URLs"
-                    });
-                  }
-                  return {
-                    type: "file",
-                    file: {
-                      filename: (_c = part.filename) != null ? _c : `part-${index}.pdf`,
-                      file_data: `data:application/pdf;base64,${convertToBase64(part.data)}`
-                    }
-                  };
-                } else {
-                  throw new UnsupportedFunctionalityError({
-                    functionality: `file part media type ${part.mediaType}`
-                  });
-                }
-              }
-            }
-          })
-        });
-        break;
-      }
-      case "assistant": {
-        let text2 = "";
-        const toolCalls = [];
-        for (const part of content) {
-          switch (part.type) {
-            case "text": {
-              text2 += part.text;
-              break;
-            }
-            case "tool-call": {
-              toolCalls.push({
-                id: part.toolCallId,
-                type: "function",
-                function: {
-                  name: part.toolName,
-                  arguments: JSON.stringify(part.input)
-                }
-              });
-              break;
-            }
-          }
-        }
-        messages.push({
-          role: "assistant",
-          content: text2,
-          tool_calls: toolCalls.length > 0 ? toolCalls : undefined
-        });
-        break;
-      }
-      case "tool": {
-        for (const toolResponse of content) {
-          const output = toolResponse.output;
-          let contentValue;
-          switch (output.type) {
-            case "text":
-            case "error-text":
-              contentValue = output.value;
-              break;
-            case "content":
-            case "json":
-            case "error-json":
-              contentValue = JSON.stringify(output.value);
-              break;
-          }
-          messages.push({
-            role: "tool",
-            tool_call_id: toolResponse.toolCallId,
-            content: contentValue
-          });
-        }
-        break;
-      }
-      default: {
-        const _exhaustiveCheck = role;
-        throw new Error(`Unsupported role: ${_exhaustiveCheck}`);
-      }
-    }
-  }
-  return { messages, warnings };
-}
-function getResponseMetadata2({
-  id,
-  model,
-  created
-}) {
-  return {
-    id: id != null ? id : undefined,
-    modelId: model != null ? model : undefined,
-    timestamp: created != null ? new Date(created * 1000) : undefined
-  };
-}
-function mapOpenAIFinishReason2(finishReason) {
-  switch (finishReason) {
-    case "stop":
-      return "stop";
-    case "length":
-      return "length";
-    case "content_filter":
-      return "content-filter";
-    case "function_call":
-    case "tool_calls":
-      return "tool-calls";
-    default:
-      return "unknown";
-  }
-}
-var openaiProviderOptions2 = exports_external.object({
-  logitBias: exports_external.record(exports_external.coerce.number(), exports_external.number()).optional(),
-  logprobs: exports_external.union([exports_external.boolean(), exports_external.number()]).optional(),
-  parallelToolCalls: exports_external.boolean().optional(),
-  user: exports_external.string().optional(),
-  reasoningEffort: exports_external.enum(["low", "medium", "high"]).optional(),
-  maxCompletionTokens: exports_external.number().optional(),
-  store: exports_external.boolean().optional(),
-  metadata: exports_external.record(exports_external.string().max(64), exports_external.string().max(512)).optional(),
-  prediction: exports_external.record(exports_external.string(), exports_external.any()).optional(),
-  structuredOutputs: exports_external.boolean().optional(),
-  serviceTier: exports_external.enum(["auto", "flex", "priority"]).optional(),
-  strictJsonSchema: exports_external.boolean().optional()
-});
-var openaiErrorDataSchema2 = exports_external.object({
-  error: exports_external.object({
-    message: exports_external.string(),
-    type: exports_external.string().nullish(),
-    param: exports_external.any().nullish(),
-    code: exports_external.union([exports_external.string(), exports_external.number()]).nullish()
-  })
-});
-var openaiFailedResponseHandler2 = createJsonErrorResponseHandler({
-  errorSchema: openaiErrorDataSchema2,
-  errorToMessage: (data) => data.error.message
-});
-var comparisonFilterSchema2 = exports_external.object({
-  key: exports_external.string(),
-  type: exports_external.enum(["eq", "ne", "gt", "gte", "lt", "lte"]),
-  value: exports_external.union([exports_external.string(), exports_external.number(), exports_external.boolean()])
-});
-var compoundFilterSchema2 = exports_external.object({
-  type: exports_external.enum(["and", "or"]),
-  filters: exports_external.array(exports_external.union([comparisonFilterSchema2, exports_external.lazy(() => compoundFilterSchema2)]))
-});
-var filtersSchema2 = exports_external.union([comparisonFilterSchema2, compoundFilterSchema2]);
-var fileSearchArgsSchema2 = exports_external.object({
-  vectorStoreIds: exports_external.array(exports_external.string()).optional(),
-  maxNumResults: exports_external.number().optional(),
-  ranking: exports_external.object({
-    ranker: exports_external.enum(["auto", "default-2024-08-21"]).optional()
-  }).optional(),
-  filters: filtersSchema2.optional()
-});
-var fileSearch2 = createProviderDefinedToolFactory({
-  id: "openai.file_search",
-  name: "file_search",
-  inputSchema: exports_external.object({
-    query: exports_external.string()
-  })
-});
-var webSearchPreviewArgsSchema2 = exports_external.object({
-  searchContextSize: exports_external.enum(["low", "medium", "high"]).optional(),
-  userLocation: exports_external.object({
-    type: exports_external.literal("approximate"),
-    country: exports_external.string().optional(),
-    city: exports_external.string().optional(),
-    region: exports_external.string().optional(),
-    timezone: exports_external.string().optional()
-  }).optional()
-});
-var webSearchPreview2 = createProviderDefinedToolFactory({
-  id: "openai.web_search_preview",
-  name: "web_search_preview",
-  inputSchema: exports_external.object({})
-});
-function prepareTools4({
-  tools,
-  toolChoice,
-  structuredOutputs,
-  strictJsonSchema
-}) {
-  tools = (tools == null ? undefined : tools.length) ? tools : undefined;
-  const toolWarnings = [];
-  if (tools == null) {
-    return { tools: undefined, toolChoice: undefined, toolWarnings };
-  }
-  const openaiTools2 = [];
-  for (const tool3 of tools) {
-    switch (tool3.type) {
-      case "function":
-        openaiTools2.push({
-          type: "function",
-          function: {
-            name: tool3.name,
-            description: tool3.description,
-            parameters: tool3.inputSchema,
-            strict: structuredOutputs ? strictJsonSchema : undefined
-          }
-        });
-        break;
-      case "provider-defined":
-        switch (tool3.id) {
-          case "openai.file_search": {
-            const args = fileSearchArgsSchema2.parse(tool3.args);
-            openaiTools2.push({
-              type: "file_search",
-              vector_store_ids: args.vectorStoreIds,
-              max_num_results: args.maxNumResults,
-              ranking_options: args.ranking ? { ranker: args.ranking.ranker } : undefined,
-              filters: args.filters
-            });
-            break;
-          }
-          case "openai.web_search_preview": {
-            const args = webSearchPreviewArgsSchema2.parse(tool3.args);
-            openaiTools2.push({
-              type: "web_search_preview",
-              search_context_size: args.searchContextSize,
-              user_location: args.userLocation
-            });
-            break;
-          }
-          default:
-            toolWarnings.push({ type: "unsupported-tool", tool: tool3 });
-            break;
-        }
-        break;
-      default:
-        toolWarnings.push({ type: "unsupported-tool", tool: tool3 });
-        break;
-    }
-  }
-  if (toolChoice == null) {
-    return { tools: openaiTools2, toolChoice: undefined, toolWarnings };
-  }
-  const type = toolChoice.type;
-  switch (type) {
-    case "auto":
-    case "none":
-    case "required":
-      return { tools: openaiTools2, toolChoice: type, toolWarnings };
-    case "tool":
-      return {
-        tools: openaiTools2,
-        toolChoice: {
-          type: "function",
-          function: {
-            name: toolChoice.toolName
-          }
-        },
-        toolWarnings
-      };
-    default: {
-      const _exhaustiveCheck = type;
-      throw new UnsupportedFunctionalityError({
-        functionality: `tool choice type: ${_exhaustiveCheck}`
-      });
-    }
-  }
-}
-var OpenAIChatLanguageModel2 = class {
-  constructor(modelId, config2) {
-    this.specificationVersion = "v2";
-    this.supportedUrls = {
-      "image/*": [/^https?:\/\/.*$/]
-    };
-    this.modelId = modelId;
-    this.config = config2;
-  }
-  get provider() {
-    return this.config.provider;
-  }
-  async getArgs({
-    prompt,
-    maxOutputTokens,
-    temperature,
-    topP,
-    topK,
-    frequencyPenalty,
-    presencePenalty,
-    stopSequences,
-    responseFormat,
-    seed,
-    tools,
-    toolChoice,
-    providerOptions
-  }) {
-    var _a16, _b16, _c, _d;
-    const warnings = [];
-    const openaiOptions = (_a16 = await parseProviderOptions({
-      provider: "openai",
-      providerOptions,
-      schema: openaiProviderOptions2
-    })) != null ? _a16 : {};
-    const structuredOutputs = (_b16 = openaiOptions.structuredOutputs) != null ? _b16 : true;
-    if (topK != null) {
-      warnings.push({
-        type: "unsupported-setting",
-        setting: "topK"
-      });
-    }
-    if ((responseFormat == null ? undefined : responseFormat.type) === "json" && responseFormat.schema != null && !structuredOutputs) {
-      warnings.push({
-        type: "unsupported-setting",
-        setting: "responseFormat",
-        details: "JSON response format schema is only supported with structuredOutputs"
-      });
-    }
-    const { messages, warnings: messageWarnings } = convertToOpenAIChatMessages2({
-      prompt,
-      systemMessageMode: getSystemMessageMode2(this.modelId)
-    });
-    warnings.push(...messageWarnings);
-    const strictJsonSchema = (_c = openaiOptions.strictJsonSchema) != null ? _c : false;
-    const baseArgs = {
-      model: this.modelId,
-      logit_bias: openaiOptions.logitBias,
-      logprobs: openaiOptions.logprobs === true || typeof openaiOptions.logprobs === "number" ? true : undefined,
-      top_logprobs: typeof openaiOptions.logprobs === "number" ? openaiOptions.logprobs : typeof openaiOptions.logprobs === "boolean" ? openaiOptions.logprobs ? 0 : undefined : undefined,
-      user: openaiOptions.user,
-      parallel_tool_calls: openaiOptions.parallelToolCalls,
-      max_tokens: maxOutputTokens,
-      temperature,
-      top_p: topP,
-      frequency_penalty: frequencyPenalty,
-      presence_penalty: presencePenalty,
-      response_format: (responseFormat == null ? undefined : responseFormat.type) === "json" ? structuredOutputs && responseFormat.schema != null ? {
-        type: "json_schema",
-        json_schema: {
-          schema: responseFormat.schema,
-          strict: strictJsonSchema,
-          name: (_d = responseFormat.name) != null ? _d : "response",
-          description: responseFormat.description
-        }
-      } : { type: "json_object" } : undefined,
-      stop: stopSequences,
-      seed,
-      max_completion_tokens: openaiOptions.maxCompletionTokens,
-      store: openaiOptions.store,
-      metadata: openaiOptions.metadata,
-      prediction: openaiOptions.prediction,
-      reasoning_effort: openaiOptions.reasoningEffort,
-      service_tier: openaiOptions.serviceTier,
-      messages
-    };
-    if (isReasoningModel2(this.modelId)) {
-      if (baseArgs.temperature != null) {
-        baseArgs.temperature = undefined;
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "temperature",
-          details: "temperature is not supported for reasoning models"
-        });
-      }
-      if (baseArgs.top_p != null) {
-        baseArgs.top_p = undefined;
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "topP",
-          details: "topP is not supported for reasoning models"
-        });
-      }
-      if (baseArgs.frequency_penalty != null) {
-        baseArgs.frequency_penalty = undefined;
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "frequencyPenalty",
-          details: "frequencyPenalty is not supported for reasoning models"
-        });
-      }
-      if (baseArgs.presence_penalty != null) {
-        baseArgs.presence_penalty = undefined;
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "presencePenalty",
-          details: "presencePenalty is not supported for reasoning models"
-        });
-      }
-      if (baseArgs.logit_bias != null) {
-        baseArgs.logit_bias = undefined;
-        warnings.push({
-          type: "other",
-          message: "logitBias is not supported for reasoning models"
-        });
-      }
-      if (baseArgs.logprobs != null) {
-        baseArgs.logprobs = undefined;
-        warnings.push({
-          type: "other",
-          message: "logprobs is not supported for reasoning models"
-        });
-      }
-      if (baseArgs.top_logprobs != null) {
-        baseArgs.top_logprobs = undefined;
-        warnings.push({
-          type: "other",
-          message: "topLogprobs is not supported for reasoning models"
-        });
-      }
-      if (baseArgs.max_tokens != null) {
-        if (baseArgs.max_completion_tokens == null) {
-          baseArgs.max_completion_tokens = baseArgs.max_tokens;
-        }
-        baseArgs.max_tokens = undefined;
-      }
-    } else if (this.modelId.startsWith("gpt-4o-search-preview") || this.modelId.startsWith("gpt-4o-mini-search-preview")) {
-      if (baseArgs.temperature != null) {
-        baseArgs.temperature = undefined;
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "temperature",
-          details: "temperature is not supported for the search preview models and has been removed."
-        });
-      }
-    }
-    if (openaiOptions.serviceTier === "flex" && !supportsFlexProcessing3(this.modelId)) {
-      warnings.push({
-        type: "unsupported-setting",
-        setting: "serviceTier",
-        details: "flex processing is only available for o3 and o4-mini models"
-      });
-      baseArgs.service_tier = undefined;
-    }
-    if (openaiOptions.serviceTier === "priority" && !supportsPriorityProcessing3(this.modelId)) {
-      warnings.push({
-        type: "unsupported-setting",
-        setting: "serviceTier",
-        details: "priority processing is only available for supported models (GPT-4, o3, o4-mini) and requires Enterprise access"
-      });
-      baseArgs.service_tier = undefined;
-    }
-    const {
-      tools: openaiTools2,
-      toolChoice: openaiToolChoice,
-      toolWarnings
-    } = prepareTools4({
-      tools,
-      toolChoice,
-      structuredOutputs,
-      strictJsonSchema
-    });
-    return {
-      args: {
-        ...baseArgs,
-        tools: openaiTools2,
-        tool_choice: openaiToolChoice
-      },
-      warnings: [...warnings, ...toolWarnings]
-    };
-  }
-  async doGenerate(options) {
-    var _a16, _b16, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n;
-    const { args: body, warnings } = await this.getArgs(options);
-    const {
-      responseHeaders,
-      value: response,
-      rawValue: rawResponse
-    } = await postJsonToApi({
-      url: this.config.url({
-        path: "/chat/completions",
-        modelId: this.modelId
-      }),
-      headers: combineHeaders(this.config.headers(), options.headers),
-      body,
-      failedResponseHandler: openaiFailedResponseHandler2,
-      successfulResponseHandler: createJsonResponseHandler(openaiChatResponseSchema2),
-      abortSignal: options.abortSignal,
-      fetch: this.config.fetch
-    });
-    const choice = response.choices[0];
-    const content = [];
-    const text2 = choice.message.content;
-    if (text2 != null && text2.length > 0) {
-      content.push({ type: "text", text: text2 });
-    }
-    for (const toolCall of (_a16 = choice.message.tool_calls) != null ? _a16 : []) {
-      content.push({
-        type: "tool-call",
-        toolCallId: (_b16 = toolCall.id) != null ? _b16 : generateId(),
-        toolName: toolCall.function.name,
-        input: toolCall.function.arguments
-      });
-    }
-    for (const annotation of (_c = choice.message.annotations) != null ? _c : []) {
-      content.push({
-        type: "source",
-        sourceType: "url",
-        id: generateId(),
-        url: annotation.url,
-        title: annotation.title
-      });
-    }
-    const completionTokenDetails = (_d = response.usage) == null ? undefined : _d.completion_tokens_details;
-    const promptTokenDetails = (_e = response.usage) == null ? undefined : _e.prompt_tokens_details;
-    const providerMetadata = { openai: {} };
-    if ((completionTokenDetails == null ? undefined : completionTokenDetails.accepted_prediction_tokens) != null) {
-      providerMetadata.openai.acceptedPredictionTokens = completionTokenDetails == null ? undefined : completionTokenDetails.accepted_prediction_tokens;
-    }
-    if ((completionTokenDetails == null ? undefined : completionTokenDetails.rejected_prediction_tokens) != null) {
-      providerMetadata.openai.rejectedPredictionTokens = completionTokenDetails == null ? undefined : completionTokenDetails.rejected_prediction_tokens;
-    }
-    if (((_f = choice.logprobs) == null ? undefined : _f.content) != null) {
-      providerMetadata.openai.logprobs = choice.logprobs.content;
-    }
-    return {
-      content,
-      finishReason: mapOpenAIFinishReason2(choice.finish_reason),
-      usage: {
-        inputTokens: (_h = (_g = response.usage) == null ? undefined : _g.prompt_tokens) != null ? _h : undefined,
-        outputTokens: (_j = (_i = response.usage) == null ? undefined : _i.completion_tokens) != null ? _j : undefined,
-        totalTokens: (_l = (_k = response.usage) == null ? undefined : _k.total_tokens) != null ? _l : undefined,
-        reasoningTokens: (_m = completionTokenDetails == null ? undefined : completionTokenDetails.reasoning_tokens) != null ? _m : undefined,
-        cachedInputTokens: (_n = promptTokenDetails == null ? undefined : promptTokenDetails.cached_tokens) != null ? _n : undefined
-      },
-      request: { body },
-      response: {
-        ...getResponseMetadata2(response),
-        headers: responseHeaders,
-        body: rawResponse
-      },
-      warnings,
-      providerMetadata
-    };
-  }
-  async doStream(options) {
-    const { args, warnings } = await this.getArgs(options);
-    const body = {
-      ...args,
-      stream: true,
-      stream_options: {
-        include_usage: true
-      }
-    };
-    const { responseHeaders, value: response } = await postJsonToApi({
-      url: this.config.url({
-        path: "/chat/completions",
-        modelId: this.modelId
-      }),
-      headers: combineHeaders(this.config.headers(), options.headers),
-      body,
-      failedResponseHandler: openaiFailedResponseHandler2,
-      successfulResponseHandler: createEventSourceResponseHandler(openaiChatChunkSchema2),
-      abortSignal: options.abortSignal,
-      fetch: this.config.fetch
-    });
-    const toolCalls = [];
-    let finishReason = "unknown";
-    const usage = {
-      inputTokens: undefined,
-      outputTokens: undefined,
-      totalTokens: undefined
-    };
-    let isFirstChunk = true;
-    let isActiveText = false;
-    const providerMetadata = { openai: {} };
-    return {
-      stream: response.pipeThrough(new TransformStream({
-        start(controller) {
-          controller.enqueue({ type: "stream-start", warnings });
-        },
-        transform(chunk, controller) {
-          var _a16, _b16, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x;
-          if (options.includeRawChunks) {
-            controller.enqueue({ type: "raw", rawValue: chunk.rawValue });
-          }
-          if (!chunk.success) {
-            finishReason = "error";
-            controller.enqueue({ type: "error", error: chunk.error });
-            return;
-          }
-          const value = chunk.value;
-          if ("error" in value) {
-            finishReason = "error";
-            controller.enqueue({ type: "error", error: value.error });
-            return;
-          }
-          if (isFirstChunk) {
-            isFirstChunk = false;
-            controller.enqueue({
-              type: "response-metadata",
-              ...getResponseMetadata2(value)
-            });
-          }
-          if (value.usage != null) {
-            usage.inputTokens = (_a16 = value.usage.prompt_tokens) != null ? _a16 : undefined;
-            usage.outputTokens = (_b16 = value.usage.completion_tokens) != null ? _b16 : undefined;
-            usage.totalTokens = (_c = value.usage.total_tokens) != null ? _c : undefined;
-            usage.reasoningTokens = (_e = (_d = value.usage.completion_tokens_details) == null ? undefined : _d.reasoning_tokens) != null ? _e : undefined;
-            usage.cachedInputTokens = (_g = (_f = value.usage.prompt_tokens_details) == null ? undefined : _f.cached_tokens) != null ? _g : undefined;
-            if (((_h = value.usage.completion_tokens_details) == null ? undefined : _h.accepted_prediction_tokens) != null) {
-              providerMetadata.openai.acceptedPredictionTokens = (_i = value.usage.completion_tokens_details) == null ? undefined : _i.accepted_prediction_tokens;
-            }
-            if (((_j = value.usage.completion_tokens_details) == null ? undefined : _j.rejected_prediction_tokens) != null) {
-              providerMetadata.openai.rejectedPredictionTokens = (_k = value.usage.completion_tokens_details) == null ? undefined : _k.rejected_prediction_tokens;
-            }
-          }
-          const choice = value.choices[0];
-          if ((choice == null ? undefined : choice.finish_reason) != null) {
-            finishReason = mapOpenAIFinishReason2(choice.finish_reason);
-          }
-          if (((_l = choice == null ? undefined : choice.logprobs) == null ? undefined : _l.content) != null) {
-            providerMetadata.openai.logprobs = choice.logprobs.content;
-          }
-          if ((choice == null ? undefined : choice.delta) == null) {
-            return;
-          }
-          const delta = choice.delta;
-          if (delta.content != null) {
-            if (!isActiveText) {
-              controller.enqueue({ type: "text-start", id: "0" });
-              isActiveText = true;
-            }
-            controller.enqueue({
-              type: "text-delta",
-              id: "0",
-              delta: delta.content
-            });
-          }
-          if (delta.tool_calls != null) {
-            for (const toolCallDelta of delta.tool_calls) {
-              const index = toolCallDelta.index;
-              if (toolCalls[index] == null) {
-                if (toolCallDelta.type !== "function") {
-                  throw new InvalidResponseDataError({
-                    data: toolCallDelta,
-                    message: `Expected 'function' type.`
-                  });
-                }
-                if (toolCallDelta.id == null) {
-                  throw new InvalidResponseDataError({
-                    data: toolCallDelta,
-                    message: `Expected 'id' to be a string.`
-                  });
-                }
-                if (((_m = toolCallDelta.function) == null ? undefined : _m.name) == null) {
-                  throw new InvalidResponseDataError({
-                    data: toolCallDelta,
-                    message: `Expected 'function.name' to be a string.`
-                  });
-                }
-                controller.enqueue({
-                  type: "tool-input-start",
-                  id: toolCallDelta.id,
-                  toolName: toolCallDelta.function.name
-                });
-                toolCalls[index] = {
-                  id: toolCallDelta.id,
-                  type: "function",
-                  function: {
-                    name: toolCallDelta.function.name,
-                    arguments: (_n = toolCallDelta.function.arguments) != null ? _n : ""
-                  },
-                  hasFinished: false
-                };
-                const toolCall2 = toolCalls[index];
-                if (((_o = toolCall2.function) == null ? undefined : _o.name) != null && ((_p = toolCall2.function) == null ? undefined : _p.arguments) != null) {
-                  if (toolCall2.function.arguments.length > 0) {
-                    controller.enqueue({
-                      type: "tool-input-delta",
-                      id: toolCall2.id,
-                      delta: toolCall2.function.arguments
-                    });
-                  }
-                  if (isParsableJson(toolCall2.function.arguments)) {
-                    controller.enqueue({
-                      type: "tool-input-end",
-                      id: toolCall2.id
-                    });
-                    controller.enqueue({
-                      type: "tool-call",
-                      toolCallId: (_q = toolCall2.id) != null ? _q : generateId(),
-                      toolName: toolCall2.function.name,
-                      input: toolCall2.function.arguments
-                    });
-                    toolCall2.hasFinished = true;
-                  }
-                }
-                continue;
-              }
-              const toolCall = toolCalls[index];
-              if (toolCall.hasFinished) {
-                continue;
-              }
-              if (((_r = toolCallDelta.function) == null ? undefined : _r.arguments) != null) {
-                toolCall.function.arguments += (_t = (_s = toolCallDelta.function) == null ? undefined : _s.arguments) != null ? _t : "";
-              }
-              controller.enqueue({
-                type: "tool-input-delta",
-                id: toolCall.id,
-                delta: (_u = toolCallDelta.function.arguments) != null ? _u : ""
-              });
-              if (((_v = toolCall.function) == null ? undefined : _v.name) != null && ((_w = toolCall.function) == null ? undefined : _w.arguments) != null && isParsableJson(toolCall.function.arguments)) {
-                controller.enqueue({
-                  type: "tool-input-end",
-                  id: toolCall.id
-                });
-                controller.enqueue({
-                  type: "tool-call",
-                  toolCallId: (_x = toolCall.id) != null ? _x : generateId(),
-                  toolName: toolCall.function.name,
-                  input: toolCall.function.arguments
-                });
-                toolCall.hasFinished = true;
-              }
-            }
-          }
-          if (delta.annotations != null) {
-            for (const annotation of delta.annotations) {
-              controller.enqueue({
-                type: "source",
-                sourceType: "url",
-                id: generateId(),
-                url: annotation.url,
-                title: annotation.title
-              });
-            }
-          }
-        },
-        flush(controller) {
-          if (isActiveText) {
-            controller.enqueue({ type: "text-end", id: "0" });
-          }
-          controller.enqueue({
-            type: "finish",
-            finishReason,
-            usage,
-            ...providerMetadata != null ? { providerMetadata } : {}
-          });
-        }
-      })),
-      request: { body },
-      response: { headers: responseHeaders }
-    };
-  }
-};
-var openaiTokenUsageSchema2 = exports_external.object({
-  prompt_tokens: exports_external.number().nullish(),
-  completion_tokens: exports_external.number().nullish(),
-  total_tokens: exports_external.number().nullish(),
-  prompt_tokens_details: exports_external.object({
-    cached_tokens: exports_external.number().nullish()
-  }).nullish(),
-  completion_tokens_details: exports_external.object({
-    reasoning_tokens: exports_external.number().nullish(),
-    accepted_prediction_tokens: exports_external.number().nullish(),
-    rejected_prediction_tokens: exports_external.number().nullish()
-  }).nullish()
-}).nullish();
-var openaiChatResponseSchema2 = exports_external.object({
-  id: exports_external.string().nullish(),
-  created: exports_external.number().nullish(),
-  model: exports_external.string().nullish(),
-  choices: exports_external.array(exports_external.object({
-    message: exports_external.object({
-      role: exports_external.literal("assistant").nullish(),
-      content: exports_external.string().nullish(),
-      tool_calls: exports_external.array(exports_external.object({
-        id: exports_external.string().nullish(),
-        type: exports_external.literal("function"),
-        function: exports_external.object({
-          name: exports_external.string(),
-          arguments: exports_external.string()
-        })
-      })).nullish(),
-      annotations: exports_external.array(exports_external.object({
-        type: exports_external.literal("url_citation"),
-        start_index: exports_external.number(),
-        end_index: exports_external.number(),
-        url: exports_external.string(),
-        title: exports_external.string()
-      })).nullish()
-    }),
-    index: exports_external.number(),
-    logprobs: exports_external.object({
-      content: exports_external.array(exports_external.object({
-        token: exports_external.string(),
-        logprob: exports_external.number(),
-        top_logprobs: exports_external.array(exports_external.object({
-          token: exports_external.string(),
-          logprob: exports_external.number()
-        }))
-      })).nullish()
-    }).nullish(),
-    finish_reason: exports_external.string().nullish()
-  })),
-  usage: openaiTokenUsageSchema2
-});
-var openaiChatChunkSchema2 = exports_external.union([
-  exports_external.object({
-    id: exports_external.string().nullish(),
-    created: exports_external.number().nullish(),
-    model: exports_external.string().nullish(),
-    choices: exports_external.array(exports_external.object({
-      delta: exports_external.object({
-        role: exports_external.enum(["assistant"]).nullish(),
-        content: exports_external.string().nullish(),
-        tool_calls: exports_external.array(exports_external.object({
-          index: exports_external.number(),
-          id: exports_external.string().nullish(),
-          type: exports_external.literal("function").nullish(),
-          function: exports_external.object({
-            name: exports_external.string().nullish(),
-            arguments: exports_external.string().nullish()
-          })
-        })).nullish(),
-        annotations: exports_external.array(exports_external.object({
-          type: exports_external.literal("url_citation"),
-          start_index: exports_external.number(),
-          end_index: exports_external.number(),
-          url: exports_external.string(),
-          title: exports_external.string()
-        })).nullish()
-      }).nullish(),
-      logprobs: exports_external.object({
-        content: exports_external.array(exports_external.object({
-          token: exports_external.string(),
-          logprob: exports_external.number(),
-          top_logprobs: exports_external.array(exports_external.object({
-            token: exports_external.string(),
-            logprob: exports_external.number()
-          }))
-        })).nullish()
-      }).nullish(),
-      finish_reason: exports_external.string().nullish(),
-      index: exports_external.number()
-    })),
-    usage: openaiTokenUsageSchema2
-  }),
-  openaiErrorDataSchema2
-]);
-function isReasoningModel2(modelId) {
-  return modelId.startsWith("o");
-}
-function supportsFlexProcessing3(modelId) {
-  return modelId.startsWith("o3") || modelId.startsWith("o4-mini");
-}
-function supportsPriorityProcessing3(modelId) {
-  return modelId.startsWith("gpt-4") || modelId.startsWith("o3") || modelId.startsWith("o4-mini");
-}
-function getSystemMessageMode2(modelId) {
-  var _a16, _b16;
-  if (!isReasoningModel2(modelId)) {
-    return "system";
-  }
-  return (_b16 = (_a16 = reasoningModels2[modelId]) == null ? undefined : _a16.systemMessageMode) != null ? _b16 : "developer";
-}
-var reasoningModels2 = {
-  "o1-mini": {
-    systemMessageMode: "remove"
-  },
-  "o1-mini-2024-09-12": {
-    systemMessageMode: "remove"
-  },
-  "o1-preview": {
-    systemMessageMode: "remove"
-  },
-  "o1-preview-2024-09-12": {
-    systemMessageMode: "remove"
-  },
-  o3: {
-    systemMessageMode: "developer"
-  },
-  "o3-2025-04-16": {
-    systemMessageMode: "developer"
-  },
-  "o3-mini": {
-    systemMessageMode: "developer"
-  },
-  "o3-mini-2025-01-31": {
-    systemMessageMode: "developer"
-  },
-  "o4-mini": {
-    systemMessageMode: "developer"
-  },
-  "o4-mini-2025-04-16": {
-    systemMessageMode: "developer"
-  }
-};
-function convertToOpenAICompletionPrompt2({
-  prompt,
-  user = "user",
-  assistant = "assistant"
-}) {
-  let text2 = "";
-  if (prompt[0].role === "system") {
-    text2 += `${prompt[0].content}
-
-`;
-    prompt = prompt.slice(1);
-  }
-  for (const { role, content } of prompt) {
-    switch (role) {
-      case "system": {
-        throw new InvalidPromptError({
-          message: "Unexpected system message in prompt: ${content}",
-          prompt
-        });
-      }
-      case "user": {
-        const userMessage = content.map((part) => {
-          switch (part.type) {
-            case "text": {
-              return part.text;
-            }
-          }
-        }).filter(Boolean).join("");
-        text2 += `${user}:
-${userMessage}
-
-`;
-        break;
-      }
-      case "assistant": {
-        const assistantMessage = content.map((part) => {
-          switch (part.type) {
-            case "text": {
-              return part.text;
-            }
-            case "tool-call": {
-              throw new UnsupportedFunctionalityError({
-                functionality: "tool-call messages"
-              });
-            }
-          }
-        }).join("");
-        text2 += `${assistant}:
-${assistantMessage}
-
-`;
-        break;
-      }
-      case "tool": {
-        throw new UnsupportedFunctionalityError({
-          functionality: "tool messages"
-        });
-      }
-      default: {
-        const _exhaustiveCheck = role;
-        throw new Error(`Unsupported role: ${_exhaustiveCheck}`);
-      }
-    }
-  }
-  text2 += `${assistant}:
-`;
-  return {
-    prompt: text2,
-    stopSequences: [`
-${user}:`]
-  };
-}
-var openaiCompletionProviderOptions2 = exports_external.object({
-  echo: exports_external.boolean().optional(),
-  logitBias: exports_external.record(exports_external.string(), exports_external.number()).optional(),
-  suffix: exports_external.string().optional(),
-  user: exports_external.string().optional(),
-  logprobs: exports_external.union([exports_external.boolean(), exports_external.number()]).optional()
-});
-var OpenAICompletionLanguageModel2 = class {
-  constructor(modelId, config2) {
-    this.specificationVersion = "v2";
-    this.supportedUrls = {};
-    this.modelId = modelId;
-    this.config = config2;
-  }
-  get providerOptionsName() {
-    return this.config.provider.split(".")[0].trim();
-  }
-  get provider() {
-    return this.config.provider;
-  }
-  async getArgs({
-    prompt,
-    maxOutputTokens,
-    temperature,
-    topP,
-    topK,
-    frequencyPenalty,
-    presencePenalty,
-    stopSequences: userStopSequences,
-    responseFormat,
-    tools,
-    toolChoice,
-    seed,
-    providerOptions
-  }) {
-    const warnings = [];
-    const openaiOptions = {
-      ...await parseProviderOptions({
-        provider: "openai",
-        providerOptions,
-        schema: openaiCompletionProviderOptions2
-      }),
-      ...await parseProviderOptions({
-        provider: this.providerOptionsName,
-        providerOptions,
-        schema: openaiCompletionProviderOptions2
-      })
-    };
-    if (topK != null) {
-      warnings.push({ type: "unsupported-setting", setting: "topK" });
-    }
-    if (tools == null ? undefined : tools.length) {
-      warnings.push({ type: "unsupported-setting", setting: "tools" });
-    }
-    if (toolChoice != null) {
-      warnings.push({ type: "unsupported-setting", setting: "toolChoice" });
-    }
-    if (responseFormat != null && responseFormat.type !== "text") {
-      warnings.push({
-        type: "unsupported-setting",
-        setting: "responseFormat",
-        details: "JSON response format is not supported."
-      });
-    }
-    const { prompt: completionPrompt, stopSequences } = convertToOpenAICompletionPrompt2({ prompt });
-    const stop = [...stopSequences != null ? stopSequences : [], ...userStopSequences != null ? userStopSequences : []];
-    return {
-      args: {
-        model: this.modelId,
-        echo: openaiOptions.echo,
-        logit_bias: openaiOptions.logitBias,
-        logprobs: (openaiOptions == null ? undefined : openaiOptions.logprobs) === true ? 0 : (openaiOptions == null ? undefined : openaiOptions.logprobs) === false ? undefined : openaiOptions == null ? undefined : openaiOptions.logprobs,
-        suffix: openaiOptions.suffix,
-        user: openaiOptions.user,
-        max_tokens: maxOutputTokens,
-        temperature,
-        top_p: topP,
-        frequency_penalty: frequencyPenalty,
-        presence_penalty: presencePenalty,
-        seed,
-        prompt: completionPrompt,
-        stop: stop.length > 0 ? stop : undefined
-      },
-      warnings
-    };
-  }
-  async doGenerate(options) {
-    var _a16, _b16, _c;
-    const { args, warnings } = await this.getArgs(options);
-    const {
-      responseHeaders,
-      value: response,
-      rawValue: rawResponse
-    } = await postJsonToApi({
-      url: this.config.url({
-        path: "/completions",
-        modelId: this.modelId
-      }),
-      headers: combineHeaders(this.config.headers(), options.headers),
-      body: args,
-      failedResponseHandler: openaiFailedResponseHandler2,
-      successfulResponseHandler: createJsonResponseHandler(openaiCompletionResponseSchema2),
-      abortSignal: options.abortSignal,
-      fetch: this.config.fetch
-    });
-    const choice = response.choices[0];
-    const providerMetadata = { openai: {} };
-    if (choice.logprobs != null) {
-      providerMetadata.openai.logprobs = choice.logprobs;
-    }
-    return {
-      content: [{ type: "text", text: choice.text }],
-      usage: {
-        inputTokens: (_a16 = response.usage) == null ? undefined : _a16.prompt_tokens,
-        outputTokens: (_b16 = response.usage) == null ? undefined : _b16.completion_tokens,
-        totalTokens: (_c = response.usage) == null ? undefined : _c.total_tokens
-      },
-      finishReason: mapOpenAIFinishReason2(choice.finish_reason),
-      request: { body: args },
-      response: {
-        ...getResponseMetadata2(response),
-        headers: responseHeaders,
-        body: rawResponse
-      },
-      providerMetadata,
-      warnings
-    };
-  }
-  async doStream(options) {
-    const { args, warnings } = await this.getArgs(options);
-    const body = {
-      ...args,
-      stream: true,
-      stream_options: {
-        include_usage: true
-      }
-    };
-    const { responseHeaders, value: response } = await postJsonToApi({
-      url: this.config.url({
-        path: "/completions",
-        modelId: this.modelId
-      }),
-      headers: combineHeaders(this.config.headers(), options.headers),
-      body,
-      failedResponseHandler: openaiFailedResponseHandler2,
-      successfulResponseHandler: createEventSourceResponseHandler(openaiCompletionChunkSchema2),
-      abortSignal: options.abortSignal,
-      fetch: this.config.fetch
-    });
-    let finishReason = "unknown";
-    const providerMetadata = { openai: {} };
-    const usage = {
-      inputTokens: undefined,
-      outputTokens: undefined,
-      totalTokens: undefined
-    };
-    let isFirstChunk = true;
-    return {
-      stream: response.pipeThrough(new TransformStream({
-        start(controller) {
-          controller.enqueue({ type: "stream-start", warnings });
-        },
-        transform(chunk, controller) {
-          if (options.includeRawChunks) {
-            controller.enqueue({ type: "raw", rawValue: chunk.rawValue });
-          }
-          if (!chunk.success) {
-            finishReason = "error";
-            controller.enqueue({ type: "error", error: chunk.error });
-            return;
-          }
-          const value = chunk.value;
-          if ("error" in value) {
-            finishReason = "error";
-            controller.enqueue({ type: "error", error: value.error });
-            return;
-          }
-          if (isFirstChunk) {
-            isFirstChunk = false;
-            controller.enqueue({
-              type: "response-metadata",
-              ...getResponseMetadata2(value)
-            });
-            controller.enqueue({ type: "text-start", id: "0" });
-          }
-          if (value.usage != null) {
-            usage.inputTokens = value.usage.prompt_tokens;
-            usage.outputTokens = value.usage.completion_tokens;
-            usage.totalTokens = value.usage.total_tokens;
-          }
-          const choice = value.choices[0];
-          if ((choice == null ? undefined : choice.finish_reason) != null) {
-            finishReason = mapOpenAIFinishReason2(choice.finish_reason);
-          }
-          if ((choice == null ? undefined : choice.logprobs) != null) {
-            providerMetadata.openai.logprobs = choice.logprobs;
-          }
-          if ((choice == null ? undefined : choice.text) != null && choice.text.length > 0) {
-            controller.enqueue({
-              type: "text-delta",
-              id: "0",
-              delta: choice.text
-            });
-          }
-        },
-        flush(controller) {
-          if (!isFirstChunk) {
-            controller.enqueue({ type: "text-end", id: "0" });
-          }
-          controller.enqueue({
-            type: "finish",
-            finishReason,
-            providerMetadata,
-            usage
-          });
-        }
-      })),
-      request: { body },
-      response: { headers: responseHeaders }
-    };
-  }
-};
-var usageSchema3 = exports_external.object({
-  prompt_tokens: exports_external.number(),
-  completion_tokens: exports_external.number(),
-  total_tokens: exports_external.number()
-});
-var openaiCompletionResponseSchema2 = exports_external.object({
-  id: exports_external.string().nullish(),
-  created: exports_external.number().nullish(),
-  model: exports_external.string().nullish(),
-  choices: exports_external.array(exports_external.object({
-    text: exports_external.string(),
-    finish_reason: exports_external.string(),
-    logprobs: exports_external.object({
-      tokens: exports_external.array(exports_external.string()),
-      token_logprobs: exports_external.array(exports_external.number()),
-      top_logprobs: exports_external.array(exports_external.record(exports_external.string(), exports_external.number())).nullish()
-    }).nullish()
-  })),
-  usage: usageSchema3.nullish()
-});
-var openaiCompletionChunkSchema2 = exports_external.union([
-  exports_external.object({
-    id: exports_external.string().nullish(),
-    created: exports_external.number().nullish(),
-    model: exports_external.string().nullish(),
-    choices: exports_external.array(exports_external.object({
-      text: exports_external.string(),
-      finish_reason: exports_external.string().nullish(),
-      index: exports_external.number(),
-      logprobs: exports_external.object({
-        tokens: exports_external.array(exports_external.string()),
-        token_logprobs: exports_external.array(exports_external.number()),
-        top_logprobs: exports_external.array(exports_external.record(exports_external.string(), exports_external.number())).nullish()
-      }).nullish()
-    })),
-    usage: usageSchema3.nullish()
-  }),
-  openaiErrorDataSchema2
-]);
-var openaiEmbeddingProviderOptions2 = exports_external.object({
-  dimensions: exports_external.number().optional(),
-  user: exports_external.string().optional()
-});
-var OpenAIEmbeddingModel2 = class {
-  constructor(modelId, config2) {
-    this.specificationVersion = "v2";
-    this.maxEmbeddingsPerCall = 2048;
-    this.supportsParallelCalls = true;
-    this.modelId = modelId;
-    this.config = config2;
-  }
-  get provider() {
-    return this.config.provider;
-  }
-  async doEmbed({
-    values,
-    headers,
-    abortSignal,
-    providerOptions
-  }) {
-    var _a16;
-    if (values.length > this.maxEmbeddingsPerCall) {
-      throw new TooManyEmbeddingValuesForCallError({
-        provider: this.provider,
-        modelId: this.modelId,
-        maxEmbeddingsPerCall: this.maxEmbeddingsPerCall,
-        values
-      });
-    }
-    const openaiOptions = (_a16 = await parseProviderOptions({
-      provider: "openai",
-      providerOptions,
-      schema: openaiEmbeddingProviderOptions2
-    })) != null ? _a16 : {};
-    const {
-      responseHeaders,
-      value: response,
-      rawValue
-    } = await postJsonToApi({
-      url: this.config.url({
-        path: "/embeddings",
-        modelId: this.modelId
-      }),
-      headers: combineHeaders(this.config.headers(), headers),
-      body: {
-        model: this.modelId,
-        input: values,
-        encoding_format: "float",
-        dimensions: openaiOptions.dimensions,
-        user: openaiOptions.user
-      },
-      failedResponseHandler: openaiFailedResponseHandler2,
-      successfulResponseHandler: createJsonResponseHandler(openaiTextEmbeddingResponseSchema2),
-      abortSignal,
-      fetch: this.config.fetch
-    });
-    return {
-      embeddings: response.data.map((item) => item.embedding),
-      usage: response.usage ? { tokens: response.usage.prompt_tokens } : undefined,
-      response: { headers: responseHeaders, body: rawValue }
-    };
-  }
-};
-var openaiTextEmbeddingResponseSchema2 = exports_external.object({
-  data: exports_external.array(exports_external.object({ embedding: exports_external.array(exports_external.number()) })),
-  usage: exports_external.object({ prompt_tokens: exports_external.number() }).nullish()
-});
-var modelMaxImagesPerCall2 = {
-  "dall-e-3": 1,
-  "dall-e-2": 10,
-  "gpt-image-1": 10
-};
-var hasDefaultResponseFormat2 = /* @__PURE__ */ new Set(["gpt-image-1"]);
-var OpenAIImageModel2 = class {
-  constructor(modelId, config2) {
-    this.modelId = modelId;
-    this.config = config2;
-    this.specificationVersion = "v2";
-  }
-  get maxImagesPerCall() {
-    var _a16;
-    return (_a16 = modelMaxImagesPerCall2[this.modelId]) != null ? _a16 : 1;
-  }
-  get provider() {
-    return this.config.provider;
-  }
-  async doGenerate({
-    prompt,
-    n,
-    size,
-    aspectRatio,
-    seed,
-    providerOptions,
-    headers,
-    abortSignal
-  }) {
-    var _a16, _b16, _c, _d;
-    const warnings = [];
-    if (aspectRatio != null) {
-      warnings.push({
-        type: "unsupported-setting",
-        setting: "aspectRatio",
-        details: "This model does not support aspect ratio. Use `size` instead."
-      });
-    }
-    if (seed != null) {
-      warnings.push({ type: "unsupported-setting", setting: "seed" });
-    }
-    const currentDate = (_c = (_b16 = (_a16 = this.config._internal) == null ? undefined : _a16.currentDate) == null ? undefined : _b16.call(_a16)) != null ? _c : /* @__PURE__ */ new Date;
-    const { value: response, responseHeaders } = await postJsonToApi({
-      url: this.config.url({
-        path: "/images/generations",
-        modelId: this.modelId
-      }),
-      headers: combineHeaders(this.config.headers(), headers),
-      body: {
-        model: this.modelId,
-        prompt,
-        n,
-        size,
-        ...(_d = providerOptions.openai) != null ? _d : {},
-        ...!hasDefaultResponseFormat2.has(this.modelId) ? { response_format: "b64_json" } : {}
-      },
-      failedResponseHandler: openaiFailedResponseHandler2,
-      successfulResponseHandler: createJsonResponseHandler(openaiImageResponseSchema2),
-      abortSignal,
-      fetch: this.config.fetch
-    });
-    return {
-      images: response.data.map((item) => item.b64_json),
-      warnings,
-      response: {
-        timestamp: currentDate,
-        modelId: this.modelId,
-        headers: responseHeaders
-      },
-      providerMetadata: {
-        openai: {
-          images: response.data.map((item) => item.revised_prompt ? {
-            revisedPrompt: item.revised_prompt
-          } : null)
-        }
-      }
-    };
-  }
-};
-var openaiImageResponseSchema2 = exports_external.object({
-  data: exports_external.array(exports_external.object({ b64_json: exports_external.string(), revised_prompt: exports_external.string().optional() }))
-});
-var openaiTools2 = {
-  fileSearch: fileSearch2,
-  webSearchPreview: webSearchPreview2
-};
-var openAITranscriptionProviderOptions2 = exports_external.object({
-  include: exports_external.array(exports_external.string()).optional(),
-  language: exports_external.string().optional(),
-  prompt: exports_external.string().optional(),
-  temperature: exports_external.number().min(0).max(1).default(0).optional(),
-  timestampGranularities: exports_external.array(exports_external.enum(["word", "segment"])).default(["segment"]).optional()
-});
-var languageMap2 = {
-  afrikaans: "af",
-  arabic: "ar",
-  armenian: "hy",
-  azerbaijani: "az",
-  belarusian: "be",
-  bosnian: "bs",
-  bulgarian: "bg",
-  catalan: "ca",
-  chinese: "zh",
-  croatian: "hr",
-  czech: "cs",
-  danish: "da",
-  dutch: "nl",
-  english: "en",
-  estonian: "et",
-  finnish: "fi",
-  french: "fr",
-  galician: "gl",
-  german: "de",
-  greek: "el",
-  hebrew: "he",
-  hindi: "hi",
-  hungarian: "hu",
-  icelandic: "is",
-  indonesian: "id",
-  italian: "it",
-  japanese: "ja",
-  kannada: "kn",
-  kazakh: "kk",
-  korean: "ko",
-  latvian: "lv",
-  lithuanian: "lt",
-  macedonian: "mk",
-  malay: "ms",
-  marathi: "mr",
-  maori: "mi",
-  nepali: "ne",
-  norwegian: "no",
-  persian: "fa",
-  polish: "pl",
-  portuguese: "pt",
-  romanian: "ro",
-  russian: "ru",
-  serbian: "sr",
-  slovak: "sk",
-  slovenian: "sl",
-  spanish: "es",
-  swahili: "sw",
-  swedish: "sv",
-  tagalog: "tl",
-  tamil: "ta",
-  thai: "th",
-  turkish: "tr",
-  ukrainian: "uk",
-  urdu: "ur",
-  vietnamese: "vi",
-  welsh: "cy"
-};
-var OpenAITranscriptionModel2 = class {
-  constructor(modelId, config2) {
-    this.modelId = modelId;
-    this.config = config2;
-    this.specificationVersion = "v2";
-  }
-  get provider() {
-    return this.config.provider;
-  }
-  async getArgs({
-    audio,
-    mediaType,
-    providerOptions
-  }) {
-    const warnings = [];
-    const openAIOptions = await parseProviderOptions({
-      provider: "openai",
-      providerOptions,
-      schema: openAITranscriptionProviderOptions2
-    });
-    const formData = new FormData;
-    const blob = audio instanceof Uint8Array ? new Blob([audio]) : new Blob([convertBase64ToUint8Array(audio)]);
-    formData.append("model", this.modelId);
-    formData.append("file", new File([blob], "audio", { type: mediaType }));
-    if (openAIOptions) {
-      const transcriptionModelOptions = {
-        include: openAIOptions.include,
-        language: openAIOptions.language,
-        prompt: openAIOptions.prompt,
-        temperature: openAIOptions.temperature,
-        timestamp_granularities: openAIOptions.timestampGranularities
-      };
-      for (const [key, value] of Object.entries(transcriptionModelOptions)) {
-        if (value != null) {
-          formData.append(key, String(value));
-        }
-      }
-    }
-    return {
-      formData,
-      warnings
-    };
-  }
-  async doGenerate(options) {
-    var _a16, _b16, _c, _d, _e, _f;
-    const currentDate = (_c = (_b16 = (_a16 = this.config._internal) == null ? undefined : _a16.currentDate) == null ? undefined : _b16.call(_a16)) != null ? _c : /* @__PURE__ */ new Date;
-    const { formData, warnings } = await this.getArgs(options);
-    const {
-      value: response,
-      responseHeaders,
-      rawValue: rawResponse
-    } = await postFormDataToApi({
-      url: this.config.url({
-        path: "/audio/transcriptions",
-        modelId: this.modelId
-      }),
-      headers: combineHeaders(this.config.headers(), options.headers),
-      formData,
-      failedResponseHandler: openaiFailedResponseHandler2,
-      successfulResponseHandler: createJsonResponseHandler(openaiTranscriptionResponseSchema2),
-      abortSignal: options.abortSignal,
-      fetch: this.config.fetch
-    });
-    const language = response.language != null && response.language in languageMap2 ? languageMap2[response.language] : undefined;
-    return {
-      text: response.text,
-      segments: (_e = (_d = response.words) == null ? undefined : _d.map((word) => ({
-        text: word.word,
-        startSecond: word.start,
-        endSecond: word.end
-      }))) != null ? _e : [],
-      language,
-      durationInSeconds: (_f = response.duration) != null ? _f : undefined,
-      warnings,
-      response: {
-        timestamp: currentDate,
-        modelId: this.modelId,
-        headers: responseHeaders,
-        body: rawResponse
-      }
-    };
-  }
-};
-var openaiTranscriptionResponseSchema2 = exports_external.object({
-  text: exports_external.string(),
-  language: exports_external.string().nullish(),
-  duration: exports_external.number().nullish(),
-  words: exports_external.array(exports_external.object({
-    word: exports_external.string(),
-    start: exports_external.number(),
-    end: exports_external.number()
-  })).nullish()
-});
-async function convertToOpenAIResponsesMessages2({
-  prompt,
-  systemMessageMode
-}) {
-  var _a16, _b16, _c, _d, _e, _f;
-  const messages = [];
-  const warnings = [];
-  for (const { role, content } of prompt) {
-    switch (role) {
-      case "system": {
-        switch (systemMessageMode) {
-          case "system": {
-            messages.push({ role: "system", content });
-            break;
-          }
-          case "developer": {
-            messages.push({ role: "developer", content });
-            break;
-          }
-          case "remove": {
-            warnings.push({
-              type: "other",
-              message: "system messages are removed for this model"
-            });
-            break;
-          }
-          default: {
-            const _exhaustiveCheck = systemMessageMode;
-            throw new Error(`Unsupported system message mode: ${_exhaustiveCheck}`);
-          }
-        }
-        break;
-      }
-      case "user": {
-        messages.push({
-          role: "user",
-          content: content.map((part, index) => {
-            var _a26, _b24, _c2;
-            switch (part.type) {
-              case "text": {
-                return { type: "input_text", text: part.text };
-              }
-              case "file": {
-                if (part.mediaType.startsWith("image/")) {
-                  const mediaType = part.mediaType === "image/*" ? "image/jpeg" : part.mediaType;
-                  return {
-                    type: "input_image",
-                    image_url: part.data instanceof URL ? part.data.toString() : `data:${mediaType};base64,${part.data}`,
-                    detail: (_b24 = (_a26 = part.providerOptions) == null ? undefined : _a26.openai) == null ? undefined : _b24.imageDetail
-                  };
-                } else if (part.mediaType === "application/pdf") {
-                  if (part.data instanceof URL) {
-                    throw new UnsupportedFunctionalityError({
-                      functionality: "PDF file parts with URLs"
-                    });
-                  }
-                  return {
-                    type: "input_file",
-                    filename: (_c2 = part.filename) != null ? _c2 : `part-${index}.pdf`,
-                    file_data: `data:application/pdf;base64,${part.data}`
-                  };
-                } else {
-                  throw new UnsupportedFunctionalityError({
-                    functionality: `file part media type ${part.mediaType}`
-                  });
-                }
-              }
-            }
-          })
-        });
-        break;
-      }
-      case "assistant": {
-        const reasoningMessages = {};
-        for (const part of content) {
-          switch (part.type) {
-            case "text": {
-              messages.push({
-                role: "assistant",
-                content: [{ type: "output_text", text: part.text }],
-                id: (_c = (_b16 = (_a16 = part.providerOptions) == null ? undefined : _a16.openai) == null ? undefined : _b16.itemId) != null ? _c : undefined
-              });
-              break;
-            }
-            case "tool-call": {
-              if (part.providerExecuted) {
-                break;
-              }
-              messages.push({
-                type: "function_call",
-                call_id: part.toolCallId,
-                name: part.toolName,
-                arguments: JSON.stringify(part.input),
-                id: (_f = (_e = (_d = part.providerOptions) == null ? undefined : _d.openai) == null ? undefined : _e.itemId) != null ? _f : undefined
-              });
-              break;
-            }
-            case "tool-result": {
-              warnings.push({
-                type: "other",
-                message: `tool result parts in assistant messages are not supported for OpenAI responses`
-              });
-              break;
-            }
-            case "reasoning": {
-              const providerOptions = await parseProviderOptions({
-                provider: "openai",
-                providerOptions: part.providerOptions,
-                schema: openaiResponsesReasoningProviderOptionsSchema2
-              });
-              const reasoningId = providerOptions == null ? undefined : providerOptions.itemId;
-              if (reasoningId != null) {
-                const existingReasoningMessage = reasoningMessages[reasoningId];
-                const summaryParts = [];
-                if (part.text.length > 0) {
-                  summaryParts.push({ type: "summary_text", text: part.text });
-                } else if (existingReasoningMessage !== undefined) {
-                  warnings.push({
-                    type: "other",
-                    message: `Cannot append empty reasoning part to existing reasoning sequence. Skipping reasoning part: ${JSON.stringify(part)}.`
-                  });
-                }
-                if (existingReasoningMessage === undefined) {
-                  reasoningMessages[reasoningId] = {
-                    type: "reasoning",
-                    id: reasoningId,
-                    encrypted_content: providerOptions == null ? undefined : providerOptions.reasoningEncryptedContent,
-                    summary: summaryParts
-                  };
-                  messages.push(reasoningMessages[reasoningId]);
-                } else {
-                  existingReasoningMessage.summary.push(...summaryParts);
-                }
-              } else {
-                warnings.push({
-                  type: "other",
-                  message: `Non-OpenAI reasoning parts are not supported. Skipping reasoning part: ${JSON.stringify(part)}.`
-                });
-              }
-              break;
-            }
-          }
-        }
-        break;
-      }
-      case "tool": {
-        for (const part of content) {
-          const output = part.output;
-          let contentValue;
-          switch (output.type) {
-            case "text":
-            case "error-text":
-              contentValue = output.value;
-              break;
-            case "content":
-            case "json":
-            case "error-json":
-              contentValue = JSON.stringify(output.value);
-              break;
-          }
-          messages.push({
-            type: "function_call_output",
-            call_id: part.toolCallId,
-            output: contentValue
-          });
-        }
-        break;
-      }
-      default: {
-        const _exhaustiveCheck = role;
-        throw new Error(`Unsupported role: ${_exhaustiveCheck}`);
-      }
-    }
-  }
-  return { messages, warnings };
-}
-var openaiResponsesReasoningProviderOptionsSchema2 = exports_external.object({
-  itemId: exports_external.string().nullish(),
-  reasoningEncryptedContent: exports_external.string().nullish()
-});
-function mapOpenAIResponseFinishReason2({
-  finishReason,
-  hasToolCalls
-}) {
-  switch (finishReason) {
-    case undefined:
-    case null:
-      return hasToolCalls ? "tool-calls" : "stop";
-    case "max_output_tokens":
-      return "length";
-    case "content_filter":
-      return "content-filter";
-    default:
-      return hasToolCalls ? "tool-calls" : "unknown";
-  }
-}
-function prepareResponsesTools2({
-  tools,
-  toolChoice,
-  strictJsonSchema
-}) {
-  tools = (tools == null ? undefined : tools.length) ? tools : undefined;
-  const toolWarnings = [];
-  if (tools == null) {
-    return { tools: undefined, toolChoice: undefined, toolWarnings };
-  }
-  const openaiTools22 = [];
-  for (const tool3 of tools) {
-    switch (tool3.type) {
-      case "function":
-        openaiTools22.push({
-          type: "function",
-          name: tool3.name,
-          description: tool3.description,
-          parameters: tool3.inputSchema,
-          strict: strictJsonSchema
-        });
-        break;
-      case "provider-defined":
-        switch (tool3.id) {
-          case "openai.file_search": {
-            const args = fileSearchArgsSchema2.parse(tool3.args);
-            openaiTools22.push({
-              type: "file_search",
-              vector_store_ids: args.vectorStoreIds,
-              max_num_results: args.maxNumResults,
-              ranking_options: args.ranking ? { ranker: args.ranking.ranker } : undefined,
-              filters: args.filters
-            });
-            break;
-          }
-          case "openai.web_search_preview":
-            openaiTools22.push({
-              type: "web_search_preview",
-              search_context_size: tool3.args.searchContextSize,
-              user_location: tool3.args.userLocation
-            });
-            break;
-          default:
-            toolWarnings.push({ type: "unsupported-tool", tool: tool3 });
-            break;
-        }
-        break;
-      default:
-        toolWarnings.push({ type: "unsupported-tool", tool: tool3 });
-        break;
-    }
-  }
-  if (toolChoice == null) {
-    return { tools: openaiTools22, toolChoice: undefined, toolWarnings };
-  }
-  const type = toolChoice.type;
-  switch (type) {
-    case "auto":
-    case "none":
-    case "required":
-      return { tools: openaiTools22, toolChoice: type, toolWarnings };
-    case "tool":
-      return {
-        tools: openaiTools22,
-        toolChoice: toolChoice.toolName === "file_search" ? { type: "file_search" } : toolChoice.toolName === "web_search_preview" ? { type: "web_search_preview" } : { type: "function", name: toolChoice.toolName },
-        toolWarnings
-      };
-    default: {
-      const _exhaustiveCheck = type;
-      throw new UnsupportedFunctionalityError({
-        functionality: `tool choice type: ${_exhaustiveCheck}`
-      });
-    }
-  }
-}
-var OpenAIResponsesLanguageModel2 = class {
-  constructor(modelId, config2) {
-    this.specificationVersion = "v2";
-    this.supportedUrls = {
-      "image/*": [/^https?:\/\/.*$/]
-    };
-    this.modelId = modelId;
-    this.config = config2;
-  }
-  get provider() {
-    return this.config.provider;
-  }
-  async getArgs({
-    maxOutputTokens,
-    temperature,
-    stopSequences,
-    topP,
-    topK,
-    presencePenalty,
-    frequencyPenalty,
-    seed,
-    prompt,
-    providerOptions,
-    tools,
-    toolChoice,
-    responseFormat
-  }) {
-    var _a16, _b16;
-    const warnings = [];
-    const modelConfig = getResponsesModelConfig2(this.modelId);
-    if (topK != null) {
-      warnings.push({ type: "unsupported-setting", setting: "topK" });
-    }
-    if (seed != null) {
-      warnings.push({ type: "unsupported-setting", setting: "seed" });
-    }
-    if (presencePenalty != null) {
-      warnings.push({
-        type: "unsupported-setting",
-        setting: "presencePenalty"
-      });
-    }
-    if (frequencyPenalty != null) {
-      warnings.push({
-        type: "unsupported-setting",
-        setting: "frequencyPenalty"
-      });
-    }
-    if (stopSequences != null) {
-      warnings.push({ type: "unsupported-setting", setting: "stopSequences" });
-    }
-    const { messages, warnings: messageWarnings } = await convertToOpenAIResponsesMessages2({
-      prompt,
-      systemMessageMode: modelConfig.systemMessageMode
-    });
-    warnings.push(...messageWarnings);
-    const openaiOptions = await parseProviderOptions({
-      provider: "openai",
-      providerOptions,
-      schema: openaiResponsesProviderOptionsSchema2
-    });
-    const strictJsonSchema = (_a16 = openaiOptions == null ? undefined : openaiOptions.strictJsonSchema) != null ? _a16 : false;
-    const baseArgs = {
-      model: this.modelId,
-      input: messages,
-      temperature,
-      top_p: topP,
-      max_output_tokens: maxOutputTokens,
-      ...(responseFormat == null ? undefined : responseFormat.type) === "json" && {
-        text: {
-          format: responseFormat.schema != null ? {
-            type: "json_schema",
-            strict: strictJsonSchema,
-            name: (_b16 = responseFormat.name) != null ? _b16 : "response",
-            description: responseFormat.description,
-            schema: responseFormat.schema
-          } : { type: "json_object" }
-        }
-      },
-      metadata: openaiOptions == null ? undefined : openaiOptions.metadata,
-      parallel_tool_calls: openaiOptions == null ? undefined : openaiOptions.parallelToolCalls,
-      previous_response_id: openaiOptions == null ? undefined : openaiOptions.previousResponseId,
-      store: openaiOptions == null ? undefined : openaiOptions.store,
-      user: openaiOptions == null ? undefined : openaiOptions.user,
-      instructions: openaiOptions == null ? undefined : openaiOptions.instructions,
-      service_tier: openaiOptions == null ? undefined : openaiOptions.serviceTier,
-      include: openaiOptions == null ? undefined : openaiOptions.include,
-      ...modelConfig.isReasoningModel && ((openaiOptions == null ? undefined : openaiOptions.reasoningEffort) != null || (openaiOptions == null ? undefined : openaiOptions.reasoningSummary) != null) && {
-        reasoning: {
-          ...(openaiOptions == null ? undefined : openaiOptions.reasoningEffort) != null && {
-            effort: openaiOptions.reasoningEffort
-          },
-          ...(openaiOptions == null ? undefined : openaiOptions.reasoningSummary) != null && {
-            summary: openaiOptions.reasoningSummary
-          }
-        }
-      },
-      ...modelConfig.requiredAutoTruncation && {
-        truncation: "auto"
-      }
-    };
-    if (modelConfig.isReasoningModel) {
-      if (baseArgs.temperature != null) {
-        baseArgs.temperature = undefined;
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "temperature",
-          details: "temperature is not supported for reasoning models"
-        });
-      }
-      if (baseArgs.top_p != null) {
-        baseArgs.top_p = undefined;
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "topP",
-          details: "topP is not supported for reasoning models"
-        });
-      }
-    } else {
-      if ((openaiOptions == null ? undefined : openaiOptions.reasoningEffort) != null) {
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "reasoningEffort",
-          details: "reasoningEffort is not supported for non-reasoning models"
-        });
-      }
-      if ((openaiOptions == null ? undefined : openaiOptions.reasoningSummary) != null) {
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "reasoningSummary",
-          details: "reasoningSummary is not supported for non-reasoning models"
-        });
-      }
-    }
-    if ((openaiOptions == null ? undefined : openaiOptions.serviceTier) === "flex" && !supportsFlexProcessing22(this.modelId)) {
-      warnings.push({
-        type: "unsupported-setting",
-        setting: "serviceTier",
-        details: "flex processing is only available for o3 and o4-mini models"
-      });
-      delete baseArgs.service_tier;
-    }
-    if ((openaiOptions == null ? undefined : openaiOptions.serviceTier) === "priority" && !supportsPriorityProcessing22(this.modelId)) {
-      warnings.push({
-        type: "unsupported-setting",
-        setting: "serviceTier",
-        details: "priority processing is only available for supported models (GPT-4, o3, o4-mini) and requires Enterprise access"
-      });
-      delete baseArgs.service_tier;
-    }
-    const {
-      tools: openaiTools22,
-      toolChoice: openaiToolChoice,
-      toolWarnings
-    } = prepareResponsesTools2({
-      tools,
-      toolChoice,
-      strictJsonSchema
-    });
-    return {
-      args: {
-        ...baseArgs,
-        tools: openaiTools22,
-        tool_choice: openaiToolChoice
-      },
-      warnings: [...warnings, ...toolWarnings]
-    };
-  }
-  async doGenerate(options) {
-    var _a16, _b16, _c, _d, _e, _f, _g, _h, _i;
-    const { args: body, warnings } = await this.getArgs(options);
-    const url2 = this.config.url({
-      path: "/responses",
-      modelId: this.modelId
-    });
-    const {
-      responseHeaders,
-      value: response,
-      rawValue: rawResponse
-    } = await postJsonToApi({
-      url: url2,
-      headers: combineHeaders(this.config.headers(), options.headers),
-      body,
-      failedResponseHandler: openaiFailedResponseHandler2,
-      successfulResponseHandler: createJsonResponseHandler(exports_external.object({
-        id: exports_external.string(),
-        created_at: exports_external.number(),
-        error: exports_external.object({
-          code: exports_external.string(),
-          message: exports_external.string()
-        }).nullish(),
-        model: exports_external.string(),
-        output: exports_external.array(exports_external.discriminatedUnion("type", [
-          exports_external.object({
-            type: exports_external.literal("message"),
-            role: exports_external.literal("assistant"),
-            id: exports_external.string(),
-            content: exports_external.array(exports_external.object({
-              type: exports_external.literal("output_text"),
-              text: exports_external.string(),
-              annotations: exports_external.array(exports_external.object({
-                type: exports_external.literal("url_citation"),
-                start_index: exports_external.number(),
-                end_index: exports_external.number(),
-                url: exports_external.string(),
-                title: exports_external.string()
-              }))
-            }))
-          }),
-          exports_external.object({
-            type: exports_external.literal("function_call"),
-            call_id: exports_external.string(),
-            name: exports_external.string(),
-            arguments: exports_external.string(),
-            id: exports_external.string()
-          }),
-          exports_external.object({
-            type: exports_external.literal("web_search_call"),
-            id: exports_external.string(),
-            status: exports_external.string().optional()
-          }),
-          exports_external.object({
-            type: exports_external.literal("computer_call"),
-            id: exports_external.string(),
-            status: exports_external.string().optional()
-          }),
-          exports_external.object({
-            type: exports_external.literal("file_search_call"),
-            id: exports_external.string(),
-            status: exports_external.string().optional()
-          }),
-          exports_external.object({
-            type: exports_external.literal("reasoning"),
-            id: exports_external.string(),
-            encrypted_content: exports_external.string().nullish(),
-            summary: exports_external.array(exports_external.object({
-              type: exports_external.literal("summary_text"),
-              text: exports_external.string()
-            }))
-          })
-        ])),
-        incomplete_details: exports_external.object({ reason: exports_external.string() }).nullable(),
-        usage: usageSchema22
-      })),
-      abortSignal: options.abortSignal,
-      fetch: this.config.fetch
-    });
-    if (response.error) {
-      throw new APICallError({
-        message: response.error.message,
-        url: url2,
-        requestBodyValues: body,
-        statusCode: 400,
-        responseHeaders,
-        responseBody: rawResponse,
-        isRetryable: false
-      });
-    }
-    const content = [];
-    for (const part of response.output) {
-      switch (part.type) {
-        case "reasoning": {
-          if (part.summary.length === 0) {
-            part.summary.push({ type: "summary_text", text: "" });
-          }
-          for (const summary of part.summary) {
-            content.push({
-              type: "reasoning",
-              text: summary.text,
-              providerMetadata: {
-                openai: {
-                  itemId: part.id,
-                  reasoningEncryptedContent: (_a16 = part.encrypted_content) != null ? _a16 : null
-                }
-              }
-            });
-          }
-          break;
-        }
-        case "message": {
-          for (const contentPart of part.content) {
-            content.push({
-              type: "text",
-              text: contentPart.text,
-              providerMetadata: {
-                openai: {
-                  itemId: part.id
-                }
-              }
-            });
-            for (const annotation of contentPart.annotations) {
-              content.push({
-                type: "source",
-                sourceType: "url",
-                id: (_d = (_c = (_b16 = this.config).generateId) == null ? undefined : _c.call(_b16)) != null ? _d : generateId(),
-                url: annotation.url,
-                title: annotation.title
-              });
-            }
-          }
-          break;
-        }
-        case "function_call": {
-          content.push({
-            type: "tool-call",
-            toolCallId: part.call_id,
-            toolName: part.name,
-            input: part.arguments,
-            providerMetadata: {
-              openai: {
-                itemId: part.id
-              }
-            }
-          });
-          break;
-        }
-        case "web_search_call": {
-          content.push({
-            type: "tool-call",
-            toolCallId: part.id,
-            toolName: "web_search_preview",
-            input: "",
-            providerExecuted: true
-          });
-          content.push({
-            type: "tool-result",
-            toolCallId: part.id,
-            toolName: "web_search_preview",
-            result: { status: part.status || "completed" },
-            providerExecuted: true
-          });
-          break;
-        }
-        case "computer_call": {
-          content.push({
-            type: "tool-call",
-            toolCallId: part.id,
-            toolName: "computer_use",
-            input: "",
-            providerExecuted: true
-          });
-          content.push({
-            type: "tool-result",
-            toolCallId: part.id,
-            toolName: "computer_use",
-            result: {
-              type: "computer_use_tool_result",
-              status: part.status || "completed"
-            },
-            providerExecuted: true
-          });
-          break;
-        }
-        case "file_search_call": {
-          content.push({
-            type: "tool-call",
-            toolCallId: part.id,
-            toolName: "file_search",
-            input: "",
-            providerExecuted: true
-          });
-          content.push({
-            type: "tool-result",
-            toolCallId: part.id,
-            toolName: "file_search",
-            result: {
-              type: "file_search_tool_result",
-              status: part.status || "completed"
-            },
-            providerExecuted: true
-          });
-          break;
-        }
-      }
-    }
-    return {
-      content,
-      finishReason: mapOpenAIResponseFinishReason2({
-        finishReason: (_e = response.incomplete_details) == null ? undefined : _e.reason,
-        hasToolCalls: content.some((part) => part.type === "tool-call")
-      }),
-      usage: {
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
-        totalTokens: response.usage.input_tokens + response.usage.output_tokens,
-        reasoningTokens: (_g = (_f = response.usage.output_tokens_details) == null ? undefined : _f.reasoning_tokens) != null ? _g : undefined,
-        cachedInputTokens: (_i = (_h = response.usage.input_tokens_details) == null ? undefined : _h.cached_tokens) != null ? _i : undefined
-      },
-      request: { body },
-      response: {
-        id: response.id,
-        timestamp: new Date(response.created_at * 1000),
-        modelId: response.model,
-        headers: responseHeaders,
-        body: rawResponse
-      },
-      providerMetadata: {
-        openai: {
-          responseId: response.id
-        }
-      },
-      warnings
-    };
-  }
-  async doStream(options) {
-    const { args: body, warnings } = await this.getArgs(options);
-    const { responseHeaders, value: response } = await postJsonToApi({
-      url: this.config.url({
-        path: "/responses",
-        modelId: this.modelId
-      }),
-      headers: combineHeaders(this.config.headers(), options.headers),
-      body: {
-        ...body,
-        stream: true
-      },
-      failedResponseHandler: openaiFailedResponseHandler2,
-      successfulResponseHandler: createEventSourceResponseHandler(openaiResponsesChunkSchema2),
-      abortSignal: options.abortSignal,
-      fetch: this.config.fetch
-    });
-    const self = this;
-    let finishReason = "unknown";
-    const usage = {
-      inputTokens: undefined,
-      outputTokens: undefined,
-      totalTokens: undefined
-    };
-    let responseId = null;
-    const ongoingToolCalls = {};
-    let hasToolCalls = false;
-    const activeReasoning = {};
-    return {
-      stream: response.pipeThrough(new TransformStream({
-        start(controller) {
-          controller.enqueue({ type: "stream-start", warnings });
-        },
-        transform(chunk, controller) {
-          var _a16, _b16, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m;
-          if (options.includeRawChunks) {
-            controller.enqueue({ type: "raw", rawValue: chunk.rawValue });
-          }
-          if (!chunk.success) {
-            finishReason = "error";
-            controller.enqueue({ type: "error", error: chunk.error });
-            return;
-          }
-          const value = chunk.value;
-          if (isResponseOutputItemAddedChunk2(value)) {
-            if (value.item.type === "function_call") {
-              ongoingToolCalls[value.output_index] = {
-                toolName: value.item.name,
-                toolCallId: value.item.call_id
-              };
-              controller.enqueue({
-                type: "tool-input-start",
-                id: value.item.call_id,
-                toolName: value.item.name
-              });
-            } else if (value.item.type === "web_search_call") {
-              ongoingToolCalls[value.output_index] = {
-                toolName: "web_search_preview",
-                toolCallId: value.item.id
-              };
-              controller.enqueue({
-                type: "tool-input-start",
-                id: value.item.id,
-                toolName: "web_search_preview"
-              });
-            } else if (value.item.type === "computer_call") {
-              ongoingToolCalls[value.output_index] = {
-                toolName: "computer_use",
-                toolCallId: value.item.id
-              };
-              controller.enqueue({
-                type: "tool-input-start",
-                id: value.item.id,
-                toolName: "computer_use"
-              });
-            } else if (value.item.type === "message") {
-              controller.enqueue({
-                type: "text-start",
-                id: value.item.id,
-                providerMetadata: {
-                  openai: {
-                    itemId: value.item.id
-                  }
-                }
-              });
-            } else if (isResponseOutputItemAddedReasoningChunk2(value)) {
-              activeReasoning[value.item.id] = {
-                encryptedContent: value.item.encrypted_content,
-                summaryParts: [0]
-              };
-              controller.enqueue({
-                type: "reasoning-start",
-                id: `${value.item.id}:0`,
-                providerMetadata: {
-                  openai: {
-                    itemId: value.item.id,
-                    reasoningEncryptedContent: (_a16 = value.item.encrypted_content) != null ? _a16 : null
-                  }
-                }
-              });
-            }
-          } else if (isResponseOutputItemDoneChunk2(value)) {
-            if (value.item.type === "function_call") {
-              ongoingToolCalls[value.output_index] = undefined;
-              hasToolCalls = true;
-              controller.enqueue({
-                type: "tool-input-end",
-                id: value.item.call_id
-              });
-              controller.enqueue({
-                type: "tool-call",
-                toolCallId: value.item.call_id,
-                toolName: value.item.name,
-                input: value.item.arguments,
-                providerMetadata: {
-                  openai: {
-                    itemId: value.item.id
-                  }
-                }
-              });
-            } else if (value.item.type === "web_search_call") {
-              ongoingToolCalls[value.output_index] = undefined;
-              hasToolCalls = true;
-              controller.enqueue({
-                type: "tool-input-end",
-                id: value.item.id
-              });
-              controller.enqueue({
-                type: "tool-call",
-                toolCallId: value.item.id,
-                toolName: "web_search_preview",
-                input: "",
-                providerExecuted: true
-              });
-              controller.enqueue({
-                type: "tool-result",
-                toolCallId: value.item.id,
-                toolName: "web_search_preview",
-                result: {
-                  type: "web_search_tool_result",
-                  status: value.item.status || "completed"
-                },
-                providerExecuted: true
-              });
-            } else if (value.item.type === "computer_call") {
-              ongoingToolCalls[value.output_index] = undefined;
-              hasToolCalls = true;
-              controller.enqueue({
-                type: "tool-input-end",
-                id: value.item.id
-              });
-              controller.enqueue({
-                type: "tool-call",
-                toolCallId: value.item.id,
-                toolName: "computer_use",
-                input: "",
-                providerExecuted: true
-              });
-              controller.enqueue({
-                type: "tool-result",
-                toolCallId: value.item.id,
-                toolName: "computer_use",
-                result: {
-                  type: "computer_use_tool_result",
-                  status: value.item.status || "completed"
-                },
-                providerExecuted: true
-              });
-            } else if (value.item.type === "message") {
-              controller.enqueue({
-                type: "text-end",
-                id: value.item.id
-              });
-            } else if (isResponseOutputItemDoneReasoningChunk2(value)) {
-              const activeReasoningPart = activeReasoning[value.item.id];
-              for (const summaryIndex of activeReasoningPart.summaryParts) {
-                controller.enqueue({
-                  type: "reasoning-end",
-                  id: `${value.item.id}:${summaryIndex}`,
-                  providerMetadata: {
-                    openai: {
-                      itemId: value.item.id,
-                      reasoningEncryptedContent: (_b16 = value.item.encrypted_content) != null ? _b16 : null
-                    }
-                  }
-                });
-              }
-              delete activeReasoning[value.item.id];
-            }
-          } else if (isResponseFunctionCallArgumentsDeltaChunk2(value)) {
-            const toolCall = ongoingToolCalls[value.output_index];
-            if (toolCall != null) {
-              controller.enqueue({
-                type: "tool-input-delta",
-                id: toolCall.toolCallId,
-                delta: value.delta
-              });
-            }
-          } else if (isResponseCreatedChunk2(value)) {
-            responseId = value.response.id;
-            controller.enqueue({
-              type: "response-metadata",
-              id: value.response.id,
-              timestamp: new Date(value.response.created_at * 1000),
-              modelId: value.response.model
-            });
-          } else if (isTextDeltaChunk2(value)) {
-            controller.enqueue({
-              type: "text-delta",
-              id: value.item_id,
-              delta: value.delta
-            });
-          } else if (isResponseReasoningSummaryPartAddedChunk2(value)) {
-            if (value.summary_index > 0) {
-              (_c = activeReasoning[value.item_id]) == null || _c.summaryParts.push(value.summary_index);
-              controller.enqueue({
-                type: "reasoning-start",
-                id: `${value.item_id}:${value.summary_index}`,
-                providerMetadata: {
-                  openai: {
-                    itemId: value.item_id,
-                    reasoningEncryptedContent: (_e = (_d = activeReasoning[value.item_id]) == null ? undefined : _d.encryptedContent) != null ? _e : null
-                  }
-                }
-              });
-            }
-          } else if (isResponseReasoningSummaryTextDeltaChunk2(value)) {
-            controller.enqueue({
-              type: "reasoning-delta",
-              id: `${value.item_id}:${value.summary_index}`,
-              delta: value.delta,
-              providerMetadata: {
-                openai: {
-                  itemId: value.item_id
-                }
-              }
-            });
-          } else if (isResponseFinishedChunk2(value)) {
-            finishReason = mapOpenAIResponseFinishReason2({
-              finishReason: (_f = value.response.incomplete_details) == null ? undefined : _f.reason,
-              hasToolCalls
-            });
-            usage.inputTokens = value.response.usage.input_tokens;
-            usage.outputTokens = value.response.usage.output_tokens;
-            usage.totalTokens = value.response.usage.input_tokens + value.response.usage.output_tokens;
-            usage.reasoningTokens = (_h = (_g = value.response.usage.output_tokens_details) == null ? undefined : _g.reasoning_tokens) != null ? _h : undefined;
-            usage.cachedInputTokens = (_j = (_i = value.response.usage.input_tokens_details) == null ? undefined : _i.cached_tokens) != null ? _j : undefined;
-          } else if (isResponseAnnotationAddedChunk2(value)) {
-            controller.enqueue({
-              type: "source",
-              sourceType: "url",
-              id: (_m = (_l = (_k = self.config).generateId) == null ? undefined : _l.call(_k)) != null ? _m : generateId(),
-              url: value.annotation.url,
-              title: value.annotation.title
-            });
-          } else if (isErrorChunk2(value)) {
-            controller.enqueue({ type: "error", error: value });
-          }
-        },
-        flush(controller) {
-          controller.enqueue({
-            type: "finish",
-            finishReason,
-            usage,
-            providerMetadata: {
-              openai: {
-                responseId
-              }
-            }
-          });
-        }
-      })),
-      request: { body },
-      response: { headers: responseHeaders }
-    };
-  }
-};
-var usageSchema22 = exports_external.object({
-  input_tokens: exports_external.number(),
-  input_tokens_details: exports_external.object({ cached_tokens: exports_external.number().nullish() }).nullish(),
-  output_tokens: exports_external.number(),
-  output_tokens_details: exports_external.object({ reasoning_tokens: exports_external.number().nullish() }).nullish()
-});
-var textDeltaChunkSchema2 = exports_external.object({
-  type: exports_external.literal("response.output_text.delta"),
-  item_id: exports_external.string(),
-  delta: exports_external.string()
-});
-var errorChunkSchema2 = exports_external.object({
-  type: exports_external.literal("error"),
-  code: exports_external.string(),
-  message: exports_external.string(),
-  param: exports_external.string().nullish(),
-  sequence_number: exports_external.number()
-});
-var responseFinishedChunkSchema2 = exports_external.object({
-  type: exports_external.enum(["response.completed", "response.incomplete"]),
-  response: exports_external.object({
-    incomplete_details: exports_external.object({ reason: exports_external.string() }).nullish(),
-    usage: usageSchema22
-  })
-});
-var responseCreatedChunkSchema2 = exports_external.object({
-  type: exports_external.literal("response.created"),
-  response: exports_external.object({
-    id: exports_external.string(),
-    created_at: exports_external.number(),
-    model: exports_external.string()
-  })
-});
-var responseOutputItemAddedSchema2 = exports_external.object({
-  type: exports_external.literal("response.output_item.added"),
-  output_index: exports_external.number(),
-  item: exports_external.discriminatedUnion("type", [
-    exports_external.object({
-      type: exports_external.literal("message"),
-      id: exports_external.string()
-    }),
-    exports_external.object({
-      type: exports_external.literal("reasoning"),
-      id: exports_external.string(),
-      encrypted_content: exports_external.string().nullish()
-    }),
-    exports_external.object({
-      type: exports_external.literal("function_call"),
-      id: exports_external.string(),
-      call_id: exports_external.string(),
-      name: exports_external.string(),
-      arguments: exports_external.string()
-    }),
-    exports_external.object({
-      type: exports_external.literal("web_search_call"),
-      id: exports_external.string(),
-      status: exports_external.string()
-    }),
-    exports_external.object({
-      type: exports_external.literal("computer_call"),
-      id: exports_external.string(),
-      status: exports_external.string()
-    }),
-    exports_external.object({
-      type: exports_external.literal("file_search_call"),
-      id: exports_external.string(),
-      status: exports_external.string()
-    })
-  ])
-});
-var responseOutputItemDoneSchema2 = exports_external.object({
-  type: exports_external.literal("response.output_item.done"),
-  output_index: exports_external.number(),
-  item: exports_external.discriminatedUnion("type", [
-    exports_external.object({
-      type: exports_external.literal("message"),
-      id: exports_external.string()
-    }),
-    exports_external.object({
-      type: exports_external.literal("reasoning"),
-      id: exports_external.string(),
-      encrypted_content: exports_external.string().nullish()
-    }),
-    exports_external.object({
-      type: exports_external.literal("function_call"),
-      id: exports_external.string(),
-      call_id: exports_external.string(),
-      name: exports_external.string(),
-      arguments: exports_external.string(),
-      status: exports_external.literal("completed")
-    }),
-    exports_external.object({
-      type: exports_external.literal("web_search_call"),
-      id: exports_external.string(),
-      status: exports_external.literal("completed")
-    }),
-    exports_external.object({
-      type: exports_external.literal("computer_call"),
-      id: exports_external.string(),
-      status: exports_external.literal("completed")
-    }),
-    exports_external.object({
-      type: exports_external.literal("file_search_call"),
-      id: exports_external.string(),
-      status: exports_external.literal("completed")
-    })
-  ])
-});
-var responseFunctionCallArgumentsDeltaSchema2 = exports_external.object({
-  type: exports_external.literal("response.function_call_arguments.delta"),
-  item_id: exports_external.string(),
-  output_index: exports_external.number(),
-  delta: exports_external.string()
-});
-var responseAnnotationAddedSchema2 = exports_external.object({
-  type: exports_external.literal("response.output_text.annotation.added"),
-  annotation: exports_external.object({
-    type: exports_external.literal("url_citation"),
-    url: exports_external.string(),
-    title: exports_external.string()
-  })
-});
-var responseReasoningSummaryPartAddedSchema2 = exports_external.object({
-  type: exports_external.literal("response.reasoning_summary_part.added"),
-  item_id: exports_external.string(),
-  summary_index: exports_external.number()
-});
-var responseReasoningSummaryTextDeltaSchema2 = exports_external.object({
-  type: exports_external.literal("response.reasoning_summary_text.delta"),
-  item_id: exports_external.string(),
-  summary_index: exports_external.number(),
-  delta: exports_external.string()
-});
-var openaiResponsesChunkSchema2 = exports_external.union([
-  textDeltaChunkSchema2,
-  responseFinishedChunkSchema2,
-  responseCreatedChunkSchema2,
-  responseOutputItemAddedSchema2,
-  responseOutputItemDoneSchema2,
-  responseFunctionCallArgumentsDeltaSchema2,
-  responseAnnotationAddedSchema2,
-  responseReasoningSummaryPartAddedSchema2,
-  responseReasoningSummaryTextDeltaSchema2,
-  errorChunkSchema2,
-  exports_external.object({ type: exports_external.string() }).loose()
-]);
-function isTextDeltaChunk2(chunk) {
-  return chunk.type === "response.output_text.delta";
-}
-function isResponseOutputItemDoneChunk2(chunk) {
-  return chunk.type === "response.output_item.done";
-}
-function isResponseOutputItemDoneReasoningChunk2(chunk) {
-  return isResponseOutputItemDoneChunk2(chunk) && chunk.item.type === "reasoning";
-}
-function isResponseFinishedChunk2(chunk) {
-  return chunk.type === "response.completed" || chunk.type === "response.incomplete";
-}
-function isResponseCreatedChunk2(chunk) {
-  return chunk.type === "response.created";
-}
-function isResponseFunctionCallArgumentsDeltaChunk2(chunk) {
-  return chunk.type === "response.function_call_arguments.delta";
-}
-function isResponseOutputItemAddedChunk2(chunk) {
-  return chunk.type === "response.output_item.added";
-}
-function isResponseOutputItemAddedReasoningChunk2(chunk) {
-  return isResponseOutputItemAddedChunk2(chunk) && chunk.item.type === "reasoning";
-}
-function isResponseAnnotationAddedChunk2(chunk) {
-  return chunk.type === "response.output_text.annotation.added";
-}
-function isResponseReasoningSummaryPartAddedChunk2(chunk) {
-  return chunk.type === "response.reasoning_summary_part.added";
-}
-function isResponseReasoningSummaryTextDeltaChunk2(chunk) {
-  return chunk.type === "response.reasoning_summary_text.delta";
-}
-function isErrorChunk2(chunk) {
-  return chunk.type === "error";
-}
-function getResponsesModelConfig2(modelId) {
-  if (modelId.startsWith("o") || modelId.startsWith("codex-") || modelId.startsWith("computer-use")) {
-    if (modelId.startsWith("o1-mini") || modelId.startsWith("o1-preview")) {
-      return {
-        isReasoningModel: true,
-        systemMessageMode: "remove",
-        requiredAutoTruncation: false
-      };
-    }
-    return {
-      isReasoningModel: true,
-      systemMessageMode: "developer",
-      requiredAutoTruncation: false
-    };
-  }
-  return {
-    isReasoningModel: false,
-    systemMessageMode: "system",
-    requiredAutoTruncation: false
-  };
-}
-function supportsFlexProcessing22(modelId) {
-  return modelId.startsWith("o3") || modelId.startsWith("o4-mini");
-}
-function supportsPriorityProcessing22(modelId) {
-  return modelId.startsWith("gpt-4") || modelId.startsWith("o3") || modelId.startsWith("o4-mini");
-}
-var openaiResponsesProviderOptionsSchema2 = exports_external.object({
-  metadata: exports_external.any().nullish(),
-  parallelToolCalls: exports_external.boolean().nullish(),
-  previousResponseId: exports_external.string().nullish(),
-  store: exports_external.boolean().nullish(),
-  user: exports_external.string().nullish(),
-  reasoningEffort: exports_external.string().nullish(),
-  strictJsonSchema: exports_external.boolean().nullish(),
-  instructions: exports_external.string().nullish(),
-  reasoningSummary: exports_external.string().nullish(),
-  serviceTier: exports_external.enum(["auto", "flex", "priority"]).nullish(),
-  include: exports_external.array(exports_external.enum(["reasoning.encrypted_content", "file_search_call.results"])).nullish()
-});
-var OpenAIProviderOptionsSchema2 = exports_external.object({
-  instructions: exports_external.string().nullish(),
-  speed: exports_external.number().min(0.25).max(4).default(1).nullish()
-});
-var OpenAISpeechModel2 = class {
-  constructor(modelId, config2) {
-    this.modelId = modelId;
-    this.config = config2;
-    this.specificationVersion = "v2";
-  }
-  get provider() {
-    return this.config.provider;
-  }
-  async getArgs({
-    text: text2,
-    voice = "alloy",
-    outputFormat = "mp3",
-    speed,
-    instructions,
-    language,
-    providerOptions
-  }) {
-    const warnings = [];
-    const openAIOptions = await parseProviderOptions({
-      provider: "openai",
-      providerOptions,
-      schema: OpenAIProviderOptionsSchema2
-    });
-    const requestBody = {
-      model: this.modelId,
-      input: text2,
-      voice,
-      response_format: "mp3",
-      speed,
-      instructions
-    };
-    if (outputFormat) {
-      if (["mp3", "opus", "aac", "flac", "wav", "pcm"].includes(outputFormat)) {
-        requestBody.response_format = outputFormat;
-      } else {
-        warnings.push({
-          type: "unsupported-setting",
-          setting: "outputFormat",
-          details: `Unsupported output format: ${outputFormat}. Using mp3 instead.`
-        });
-      }
-    }
-    if (openAIOptions) {
-      const speechModelOptions = {};
-      for (const key in speechModelOptions) {
-        const value = speechModelOptions[key];
-        if (value !== undefined) {
-          requestBody[key] = value;
-        }
-      }
-    }
-    if (language) {
-      warnings.push({
-        type: "unsupported-setting",
-        setting: "language",
-        details: `OpenAI speech models do not support language selection. Language parameter "${language}" was ignored.`
-      });
-    }
-    return {
-      requestBody,
-      warnings
-    };
-  }
-  async doGenerate(options) {
-    var _a16, _b16, _c;
-    const currentDate = (_c = (_b16 = (_a16 = this.config._internal) == null ? undefined : _a16.currentDate) == null ? undefined : _b16.call(_a16)) != null ? _c : /* @__PURE__ */ new Date;
-    const { requestBody, warnings } = await this.getArgs(options);
-    const {
-      value: audio,
-      responseHeaders,
-      rawValue: rawResponse
-    } = await postJsonToApi({
-      url: this.config.url({
-        path: "/audio/speech",
-        modelId: this.modelId
-      }),
-      headers: combineHeaders(this.config.headers(), options.headers),
-      body: requestBody,
-      failedResponseHandler: openaiFailedResponseHandler2,
-      successfulResponseHandler: createBinaryResponseHandler(),
-      abortSignal: options.abortSignal,
-      fetch: this.config.fetch
-    });
-    return {
-      audio,
-      warnings,
-      request: {
-        body: JSON.stringify(requestBody)
-      },
-      response: {
-        timestamp: currentDate,
-        modelId: this.modelId,
-        headers: responseHeaders,
-        body: rawResponse
-      }
-    };
-  }
-};
-function createOpenAI2(options = {}) {
-  var _a16, _b16;
-  const baseURL = (_a16 = withoutTrailingSlash(options.baseURL)) != null ? _a16 : "https://api.openai.com/v1";
-  const providerName = (_b16 = options.name) != null ? _b16 : "openai";
-  const getHeaders = () => ({
-    Authorization: `Bearer ${loadApiKey({
-      apiKey: options.apiKey,
-      environmentVariableName: "OPENAI_API_KEY",
-      description: "OpenAI"
-    })}`,
-    "OpenAI-Organization": options.organization,
-    "OpenAI-Project": options.project,
-    ...options.headers
-  });
-  const createChatModel = (modelId) => new OpenAIChatLanguageModel2(modelId, {
-    provider: `${providerName}.chat`,
-    url: ({ path }) => `${baseURL}${path}`,
-    headers: getHeaders,
-    fetch: options.fetch
-  });
-  const createCompletionModel = (modelId) => new OpenAICompletionLanguageModel2(modelId, {
-    provider: `${providerName}.completion`,
-    url: ({ path }) => `${baseURL}${path}`,
-    headers: getHeaders,
-    fetch: options.fetch
-  });
-  const createEmbeddingModel = (modelId) => new OpenAIEmbeddingModel2(modelId, {
-    provider: `${providerName}.embedding`,
-    url: ({ path }) => `${baseURL}${path}`,
-    headers: getHeaders,
-    fetch: options.fetch
-  });
-  const createImageModel = (modelId) => new OpenAIImageModel2(modelId, {
-    provider: `${providerName}.image`,
-    url: ({ path }) => `${baseURL}${path}`,
-    headers: getHeaders,
-    fetch: options.fetch
-  });
-  const createTranscriptionModel = (modelId) => new OpenAITranscriptionModel2(modelId, {
-    provider: `${providerName}.transcription`,
-    url: ({ path }) => `${baseURL}${path}`,
-    headers: getHeaders,
-    fetch: options.fetch
-  });
-  const createSpeechModel = (modelId) => new OpenAISpeechModel2(modelId, {
-    provider: `${providerName}.speech`,
-    url: ({ path }) => `${baseURL}${path}`,
-    headers: getHeaders,
-    fetch: options.fetch
-  });
-  const createLanguageModel = (modelId) => {
-    if (new.target) {
-      throw new Error("The OpenAI model function cannot be called with the new keyword.");
-    }
-    return createResponsesModel(modelId);
-  };
-  const createResponsesModel = (modelId) => {
-    return new OpenAIResponsesLanguageModel2(modelId, {
-      provider: `${providerName}.responses`,
-      url: ({ path }) => `${baseURL}${path}`,
-      headers: getHeaders,
-      fetch: options.fetch
-    });
-  };
-  const provider = function(modelId) {
-    return createLanguageModel(modelId);
-  };
-  provider.languageModel = createLanguageModel;
-  provider.chat = createChatModel;
-  provider.completion = createCompletionModel;
-  provider.responses = createResponsesModel;
-  provider.embedding = createEmbeddingModel;
-  provider.textEmbedding = createEmbeddingModel;
-  provider.textEmbeddingModel = createEmbeddingModel;
-  provider.image = createImageModel;
-  provider.imageModel = createImageModel;
-  provider.transcription = createTranscriptionModel;
-  provider.transcriptionModel = createTranscriptionModel;
-  provider.speech = createSpeechModel;
-  provider.speechModel = createSpeechModel;
-  provider.tools = openaiTools2;
-  return provider;
-}
-var openai2 = createOpenAI2();
-
 // src/prompt/planner.txt
-var planner_default = `You are a security testing browser agent. Analyze this page snapshot and return a plan of what to explore.\r
-\r
-## Goal\r
-Maximize HTTP endpoint coverage — find every form, every interactive element, every hidden sub-menu.\r
-\r
-## Input\r
-A JSON snapshot with:\r
-- url: current page URL\r
-- viewportCenterBlocked: true if an overlay/modal/sidebar is open\r
-- elements: interactive elements with id, role, label, type, value, placeholder, href, options\r
-  - occludedBy: present when this element is physically covered by an overlay and\r
-    cannot be clicked until that overlay is cleared. The value is the overlay's\r
-    visible text (which usually includes its own dismiss control's label).\r
-- outOfScope (optional): array of labels the user has excluded — never plan tasks matching these\r
-- pendingMutations (optional): mutation keywords awaiting a triggering task.\r
-  If a task you plan would trigger one of these, set \`triggersMutation\` on that\r
-  task to the SAME keyword (exact spelling) so the waiting page gets revisited.\r
-\r
-## Output\r
-Return a JSON object with a tasks array, plus three optional Intelligence fields\r
-(pageState, revisitAfter, revisitReason — see "Page State" rule below).\r
-Two task types:\r
-\r
-**form** — fill and submit a form. Each task MUST have \`"type": "form"\`:\r
-\`\`\`json\r
-{"type": "form", "fields": [{"role": "textbox", "label": "Email", "value": "test@example.com"}], "submit": {"role": "button", "label": "Submit"}}\r
-\`\`\`\r
-\r
-**click** — click a button, tab, menu, or interactive element. Each task MUST have \`"type": "click"\`:\r
-\`\`\`json\r
-{"type": "click", "role": "button", "label": "My Account", "reason": "open account menu"}\r
-\`\`\`\r
-\r
-Full example response (with Intelligence fields):\r
-\`\`\`json\r
-{\r
-  "tasks": [\r
-    {"type": "form", "fields": [{"role": "combobox", "label": "Country", "value": "USA"}, {"role": "textbox", "label": "Name", "value": "Test User"}], "submit": {"role": "button", "label": "Save"}},\r
-    {"type": "click", "role": "button", "label": "Profile Menu"}\r
-  ],\r
-  "pageState": "populated",\r
-  "revisitAfter": null\r
-}\r
-\`\`\`\r
-\r
-Empty-state example (e.g. empty shopping cart) WITH mutation matching:\r
-\`\`\`json\r
-{\r
-  "tasks": [{"type": "click", "role": "button", "label": "Continue Shopping"}],\r
-  "pageState": "empty",\r
-  "revisitAfter": "any-mutation",\r
-  "revisitReason": "basket is empty — revisit after adding items",\r
-  "revisitOn": "cart-item-added"\r
-}\r
-\`\`\`\r
-\r
-Matching task example (later, on products page):\r
-\`\`\`json\r
-{\r
-  "tasks": [\r
-    {"type": "click", "role": "button", "label": "Add to Basket",\r
-     "triggersMutation": "cart-item-added"}\r
-  ],\r
-  "pageState": "populated"\r
-}\r
-\`\`\`\r
-\r
-## Rules\r
-\r
-### Forms\r
-- Include ALL input fields: textbox, combobox, checkbox, radio, slider\r
-- For CAPTCHA: find the [info] element with a math expression, compute the answer, use it as value\r
-- For combobox WITH "options" field: use one of the listed options as value\r
-- For combobox WITHOUT "options" field: do NOT include it in form fields. Instead, add a separate click task BEFORE the form task to open the dropdown. Use role "combobox" (not "button") in the click task — match the role exactly as shown in the elements list. The system will discover and select an option automatically.\r
-- **Field "constraints" — HTML5 validation meta. When present, the value MUST satisfy it:**\r
-  * \`min:X max:Y step:Z\` → pick a value in [X, Y] aligned to step (mid-point is usually a good default — e.g. min:0 max:1000 step:10 → 500)\r
-  * \`maxlength:N\` → keep the generated value's length ≤ N characters\r
-  * \`minlength:N\` → generate at least N characters\r
-  * \`pattern:<regex>\` → produce a value matching the regex\r
-  * \`type:email\` → valid email format (e.g. "test@example.com")\r
-  * \`type:url\` → valid absolute URL (e.g. "https://example.com")\r
-  * \`type:tel\` → digit-only phone-style string\r
-  If no \`constraints\` field is present, use the default value table below.\r
-- For slider (role=slider) without constraints: use "3"\r
-\r
-#### Conditional forms — branch coverage\r
-If a form contains a select/combobox/radio whose options look like TYPE/\r
-TIER/PLAN/ROLE/MODE choices (e.g. "Personal/Business/Enterprise",\r
-"Free/Pro", "Admin/Editor/Viewer", "Standard/Express") AND other form\r
-fields could plausibly differ per choice, plan a SEPARATE form task per\r
-option to exercise each branch. Each task uses a different option value\r
-for the choice field and lists the fields you expect for that branch\r
-(even if they are currently hidden — the executor re-scans the DOM\r
-between fills, newly-revealed fields will be filled). Skip this pattern\r
-for non-branching selects like country/timezone/language lists.\r
-\r
-#### Submit button selection\r
-- The submit button MUST be the form's own primary action button\r
-- Match the page purpose: login page → "Log in"/"Sign in", register page → "Register"/"Sign up", contact page → "Submit"/"Send"\r
-- Disabled buttons (enabled:false) become enabled after fields are filled — prefer them as submit if they match the form purpose\r
-- The submit label MUST exactly match a button element in the snapshot — do not invent labels\r
-- NEVER use as submit: navbar/layout buttons (Open Sidenav, Back, Back to homepage), OAuth/SSO buttons (Login with Google, Sign in with Facebook), sidebar toggles\r
-- **Same-label siblings:** when a label exists multiple times (scanner emits "Add User", "Add User (2)", …), the form submit is usually the later-indexed one because buttons appear AFTER their form fields in DOM order. Pick the suffixed label when the first occurrence is a toolbar/header button.\r
-\r
-### Buttons to click\r
-Include at least ONE of each distinct action type on the page. For example, if a table has Edit, Delete, and View buttons, include one Edit, one Delete, and one View — each triggers a different endpoint.\r
-\r
-Also include:\r
-- Account/user/profile menus (labels: "My Account", "Profile", username, avatar)\r
-- Navigation dropdowns (labels: "Shop", "Categories", "More")\r
-- Tabs, accordions, expandable panels\r
-- Product/item cards — include max 2-3 (the API pattern repeats)\r
-- CRUD buttons (Edit, Delete, View, Export, etc.) — one per action type is enough\r
-\r
-### Modal/dialog you opened to fill (viewportCenterBlocked + form fields)\r
-When viewportCenterBlocked is true because a MODAL/DIALOG containing form fields is\r
-open (you likely just opened it via a "+ Add" / "New" / "Create" / "Edit" button),\r
-that modal IS the content to explore: FILL its fields and SUBMIT via its primary\r
-action button (e.g. Kaydet / Save / Submit / Create). Do NOT plan a click on its\r
-close / X / Cancel control — closing it discards the form before it is submitted.\r
-Only dismiss a centered overlay that has NO form to complete (a banner, tour, cookie\r
-or notification notice covering the content behind it).\r
-\r
-### Occluded elements (occludedBy present)\r
-An element with an \`occludedBy\` field is physically covered by an overlay and\r
-cannot be clicked until that overlay is cleared. \`occludedBy\` is the overlay's\r
-visible text. BEFORE planning any task on an occluded element, plan a click that\r
-dismisses the overlay FIRST (make it the first task). Identify the dismiss control\r
-among the listed elements using the \`occludedBy\` text, and choose the LEAST-COMMITTAL\r
-option — one that closes or postpones without granting permissions, subscribing,\r
-accepting terms, or changing account state. If no such dismiss control is present,\r
-simply omit the occluded element (do not invent a control, do not click a destructive one).\r
-\r
-### Skip these (do NOT include as tasks):\r
-- Language / locale selectors (labels: "EN", "English", "DE", "🌐")\r
-- Logout / sign-out / delete account (system handles logout separately)\r
-- OAuth / SSO login buttons (Login with Google, Sign in with Facebook, Sign in with GitHub, etc.) — these trigger external redirects the agent cannot handle\r
-- Links — do NOT put links in tasks (the system handles navigation separately)\r
-- Navigation menuitems that change page ("Go to login page", "Go to register", "Orders", "Saved addresses") — the BFS system handles page navigation separately\r
-- Buttons already visible only as overlay content when viewportCenterBlocked is false\r
-\r
-### Action Priority (Intelligence)\r
-Rank tasks by semantics — MUTATING actions come BEFORE interactive reveals:\r
-\r
-| Category | Examples | Plan placement |\r
-|---|---|---|\r
-| **MUTATING** | submit buttons, Add to Cart, Save, Delete, Upload, Post, Checkout, Buy, Place Order | **FIRST** |\r
-| **INTERACTIVE** | tabs, modal opens, accordions, combobox opens, profile/account menus | after mutating |\r
-| **NAVIGATION** | "Home", "About", "Help", language selectors, menu items that only navigate | DO NOT include — BFS handles navigation separately |\r
-\r
-Always include the form submit in the same form task — never split fill from\r
-submit. Pentest goal is state-changing API coverage, not reading pages.\r
-\r
-### Out-of-Scope Filter\r
-If the input includes \`outOfScope\` (array of label strings), NEVER plan a\r
-task whose label matches any entry. Use semantic matching:\r
-- "Delete Account" also matches: "Remove Account", "Close Account",\r
-  "Permanently Delete User", "Delete My Profile"\r
-- "Cancel Subscription" also matches: "End Subscription", "Unsubscribe"\r
-- Do NOT over-match: "Delete Account" does NOT match "Delete Item",\r
-  "Delete Comment", "Delete Post" (those are item-level, not account-level)\r
-\r
-If every plannable task is out-of-scope, return an empty tasks array.\r
-\r
-### Page State (Journey Awareness)\r
-Classify the current page and set three response fields:\r
-\r
-- **pageState**: \`"populated"\` | \`"empty"\` | \`"unknown"\`\r
-  - \`"empty"\` — the page is a LIST / COLLECTION / FEED with NO DATA:\r
-    * Empty cart with only "Continue Shopping" button\r
-    * Empty order history with only "Shop now" CTA\r
-    * Empty user list with only "Invite users" button\r
-    * Empty feed with "Follow people to see posts"\r
-  - \`"populated"\` — the page has real content: list items, cart items,\r
-    feed posts, dashboard charts\r
-  - \`"unknown"\` — genuinely ambiguous (mixed content, pre-hydration,\r
-    uncertain structure). This is the SAFE DEFAULT. Do NOT use as\r
-    conservative bet when you can tell.\r
-\r
-  FORMS are NEVER "empty" when they are self-contained (login, settings,\r
-  registration — these have input fields, which are content).\r
-\r
-  EXCEPTION — Form with a required data-dependency that is unfulfilled:\r
-  A form that REQUIRES choosing from a list of items, and that list is\r
-  EMPTY (or the form cannot be submitted because of missing dependency\r
-  data). Classify this as "empty".\r
-  ✓ Product-review form with empty product dropdown → empty\r
-    (revisitOn: "product-created")\r
-  ✓ Task assignment form with no assignable users → empty\r
-    (revisitOn: "user-created")\r
-  ✓ Order form requiring items but inventory is empty → empty\r
-    (revisitOn: "item-created")\r
-  ✗ Login form with no username yet typed → NOT empty (user input, not\r
-    a data dependency)\r
-  ✗ Settings form → NOT empty (self-contained, no external dependency)\r
-\r
-  CLASSIFY ON PRIMARY PAGE CONTENT, NOT nav bar / badges / counters:\r
-  ✗ A Home page with "Cart (0)" in the nav bar is NOT "empty" — the\r
-    count is a nav indicator, not the page's primary purpose.\r
-  ✗ A landing page with a "View Cart" button is NOT "empty" — the button\r
-    is navigation, not content. Classify this as "populated" (or "unknown").\r
-  ✗ A dashboard showing "0 notifications" widget is NOT "empty" — the\r
-    dashboard itself has widgets as content.\r
-\r
-  URL HINT: "empty" typically applies when the URL path explicitly\r
-  identifies a collection view (e.g. /cart, /basket, /orders, /notifications,\r
-  /messages). Home/root/landing URLs (e.g. /, /#/, /home, /dashboard)\r
-  are rarely "empty" regardless of nav-bar counters.\r
-\r
-- **revisitAfter**: \`"any-mutation"\` when pageState is "empty" AND the page\r
-  would likely show content after a mutation elsewhere (add-to-cart,\r
-  invite-user, first-post). Otherwise \`null\`.\r
-\r
-- **revisitReason**: REQUIRED when pageState is "empty". One short sentence\r
-  explaining what mutation would populate this page.\r
-\r
-- **revisitOn** (optional but RECOMMENDED when pageState is "empty"): A short\r
-  mutation keyword in kebab-case identifying the class of action that would\r
-  populate THIS page. Use domain nouns + verbs, not endpoint paths or IDs.\r
-\r
-  Good keywords (consistent vocabulary):\r
-  - "cart-item-added", "cart-item-removed"\r
-  - "user-created", "user-invited"\r
-  - "post-created", "post-published"\r
-  - "order-placed", "order-cancelled"\r
-  - "comment-posted", "review-submitted"\r
-  - "file-uploaded", "address-saved"\r
-\r
-  Bad keywords (too specific / inconsistent):\r
-  - "POST /api/basket/items" (endpoint, not semantic)\r
-  - "user-id-42-created" (includes IDs)\r
-  - "thing-added" (too vague)\r
-\r
-  When a page on a LATER visit plans a task that would trigger THIS\r
-  mutation, set \`triggersMutation\` on that task to the SAME keyword:\r
-  \`"triggersMutation": "cart-item-added"\`. The system uses exact string\r
-  match, so use the same spelling/casing consistently across the crawl.\r
-\r
-  Omitting \`revisitOn\` falls back to "any successful mutation drains this\r
-  URL" (backward-compat behavior). Targeted matching is strictly more\r
-  efficient; use it when you can identify the class confidently.\r
-\r
-Omit these fields entirely when uncertain — the system defaults to\r
-\`unknown\`/\`null\` (no revisit triggered).\r
-\r
-### Task ordering within the array\r
-1. Mutating tasks (forms, Add to Cart, Save, etc.)\r
-2. Interactive reveals (menus, tabs, accordions)\r
-3. Account/user menus (reveal hidden sub-navigation)\r
-\r
-## Fill Values\r
-\r
-| Field | Value |\r
-|---|---|\r
-| email | test@example.com |\r
-| password | TestPassword123! |\r
-| username, login | testuser |\r
-| name | Test User |\r
-| phone | +15550001234 |\r
-| address | 123 Main St |\r
-| city | New York |\r
-| zip, postal | 10001 |\r
-| date | 2000-01-01 |\r
-| number, age | 25 |\r
-| url | https://example.com |\r
-| search, query | test |\r
-| message, notes, comment | Test input for security scan |\r
-| answer, security answer | Test Answer |\r
-| slider, range | 3 |\r
-| CAPTCHA | compute from [info] element |\r
-| unknown | test |\r
-\r
-## IMPORTANT\r
-Always respond with a valid JSON object. If there is nothing to explore, return: {"tasks":[]}\r
+var planner_default = `You are a security testing browser agent. Analyze this page snapshot and return a plan of what to explore.
+
+## Goal
+Maximize HTTP endpoint coverage — find every form, every interactive element, every hidden sub-menu.
+
+## Input
+A JSON snapshot with:
+- url: current page URL
+- viewportCenterBlocked: true if an overlay/modal/sidebar is open
+- elements: interactive elements with id, role, label, type, value, placeholder, href, options
+  - occludedBy: present when this element is physically covered by an overlay and
+    cannot be clicked until that overlay is cleared. The value is the overlay's
+    visible text (which usually includes its own dismiss control's label).
+- outOfScope (optional): array of labels the user has excluded — never plan tasks matching these
+- pendingMutations (optional): mutation keywords awaiting a triggering task.
+  If a task you plan would trigger one of these, set \`triggersMutation\` on that
+  task to the SAME keyword (exact spelling) so the waiting page gets revisited.
+
+## Output
+Return a JSON object with a tasks array, plus three optional Intelligence fields
+(pageState, revisitAfter, revisitReason — see "Page State" rule below).
+Two task types:
+
+**form** — fill and submit a form. Each task MUST have \`"type": "form"\`:
+\`\`\`json
+{"type": "form", "fields": [{"role": "textbox", "label": "Email", "value": "test@example.com"}], "submit": {"role": "button", "label": "Submit"}}
+\`\`\`
+
+**click** — click a button, tab, menu, or interactive element. Each task MUST have \`"type": "click"\`:
+\`\`\`json
+{"type": "click", "role": "button", "label": "My Account", "reason": "open account menu"}
+\`\`\`
+
+Full example response (with Intelligence fields):
+\`\`\`json
+{
+  "tasks": [
+    {"type": "form", "fields": [{"role": "combobox", "label": "Country", "value": "USA"}, {"role": "textbox", "label": "Name", "value": "Test User"}], "submit": {"role": "button", "label": "Save"}},
+    {"type": "click", "role": "button", "label": "Profile Menu"}
+  ],
+  "pageState": "populated",
+  "revisitAfter": null
+}
+\`\`\`
+
+Empty-state example (e.g. empty shopping cart) WITH mutation matching:
+\`\`\`json
+{
+  "tasks": [{"type": "click", "role": "button", "label": "Continue Shopping"}],
+  "pageState": "empty",
+  "revisitAfter": "any-mutation",
+  "revisitReason": "basket is empty — revisit after adding items",
+  "revisitOn": "cart-item-added"
+}
+\`\`\`
+
+Matching task example (later, on products page):
+\`\`\`json
+{
+  "tasks": [
+    {"type": "click", "role": "button", "label": "Add to Basket",
+     "triggersMutation": "cart-item-added"}
+  ],
+  "pageState": "populated"
+}
+\`\`\`
+
+## Rules
+
+### Forms
+- Include ALL input fields: textbox, combobox, checkbox, radio, slider
+- For CAPTCHA: find the [info] element with a math expression, compute the answer, use it as value
+- For combobox WITH "options" field: use one of the listed options as value
+- For combobox WITHOUT "options" field: do NOT include it in form fields. Instead, add a separate click task BEFORE the form task to open the dropdown. Use role "combobox" (not "button") in the click task — match the role exactly as shown in the elements list. The system will discover and select an option automatically.
+- **Field "constraints" — HTML5 validation meta. When present, the value MUST satisfy it:**
+  * \`min:X max:Y step:Z\` → pick a value in [X, Y] aligned to step (mid-point is usually a good default — e.g. min:0 max:1000 step:10 → 500)
+  * \`maxlength:N\` → keep the generated value's length ≤ N characters
+  * \`minlength:N\` → generate at least N characters
+  * \`pattern:<regex>\` → produce a value matching the regex
+  * \`type:email\` → valid email format (e.g. "test@example.com")
+  * \`type:url\` → valid absolute URL (e.g. "https://example.com")
+  * \`type:tel\` → digit-only phone-style string
+  If no \`constraints\` field is present, use the default value table below.
+- For slider (role=slider) without constraints: use "3"
+
+#### Conditional forms — branch coverage
+If a form contains a select/combobox/radio whose options look like TYPE/
+TIER/PLAN/ROLE/MODE choices (e.g. "Personal/Business/Enterprise",
+"Free/Pro", "Admin/Editor/Viewer", "Standard/Express") AND other form
+fields could plausibly differ per choice, plan a SEPARATE form task per
+option to exercise each branch. Each task uses a different option value
+for the choice field and lists the fields you expect for that branch
+(even if they are currently hidden — the executor re-scans the DOM
+between fills, newly-revealed fields will be filled). Skip this pattern
+for non-branching selects like country/timezone/language lists.
+
+#### Submit button selection
+- The submit button MUST be the form's own primary action button
+- Match the page purpose: login page → "Log in"/"Sign in", register page → "Register"/"Sign up", contact page → "Submit"/"Send"
+- Disabled buttons (enabled:false) become enabled after fields are filled — prefer them as submit if they match the form purpose
+- The submit label MUST exactly match a button element in the snapshot — do not invent labels
+- NEVER use as submit: navbar/layout buttons (Open Sidenav, Back, Back to homepage), OAuth/SSO buttons (Login with Google, Sign in with Facebook), sidebar toggles
+- **Same-label siblings:** when a label exists multiple times (scanner emits "Add User", "Add User (2)", …), the form submit is usually the later-indexed one because buttons appear AFTER their form fields in DOM order. Pick the suffixed label when the first occurrence is a toolbar/header button.
+
+### Buttons to click
+Include at least ONE of each distinct action type on the page. For example, if a table has Edit, Delete, and View buttons, include one Edit, one Delete, and one View — each triggers a different endpoint.
+
+Also include:
+- Account/user/profile menus (labels: "My Account", "Profile", username, avatar)
+- Navigation dropdowns (labels: "Shop", "Categories", "More")
+- Tabs, accordions, expandable panels
+- Product/item cards — include max 2-3 (the API pattern repeats)
+- CRUD buttons (Edit, Delete, View, Export, etc.) — one per action type is enough
+
+### Modal/dialog you opened to fill (viewportCenterBlocked + form fields)
+When viewportCenterBlocked is true because a MODAL/DIALOG containing form fields is
+open (you likely just opened it via a "+ Add" / "New" / "Create" / "Edit" button),
+that modal IS the content to explore: FILL its fields and SUBMIT via its primary
+action button (e.g. Kaydet / Save / Submit / Create). Do NOT plan a click on its
+close / X / Cancel control — closing it discards the form before it is submitted.
+Only dismiss a centered overlay that has NO form to complete (a banner, tour, cookie
+or notification notice covering the content behind it).
+
+### Occluded elements (occludedBy present)
+An element with an \`occludedBy\` field is physically covered by an overlay and
+cannot be clicked until that overlay is cleared. \`occludedBy\` is the overlay's
+visible text. BEFORE planning any task on an occluded element, plan a click that
+dismisses the overlay FIRST (make it the first task). Identify the dismiss control
+among the listed elements using the \`occludedBy\` text, and choose the LEAST-COMMITTAL
+option — one that closes or postpones without granting permissions, subscribing,
+accepting terms, or changing account state. If no such dismiss control is present,
+simply omit the occluded element (do not invent a control, do not click a destructive one).
+
+### Skip these (do NOT include as tasks):
+- Language / locale selectors (labels: "EN", "English", "DE", "🌐")
+- Logout / sign-out / delete account (system handles logout separately)
+- OAuth / SSO login buttons (Login with Google, Sign in with Facebook, Sign in with GitHub, etc.) — these trigger external redirects the agent cannot handle
+- Links — do NOT put links in tasks (the system handles navigation separately)
+- Navigation menuitems that change page ("Go to login page", "Go to register", "Orders", "Saved addresses") — the BFS system handles page navigation separately
+- Buttons already visible only as overlay content when viewportCenterBlocked is false
+
+### Action Priority (Intelligence)
+Rank tasks by semantics — MUTATING actions come BEFORE interactive reveals:
+
+| Category | Examples | Plan placement |
+|---|---|---|
+| **MUTATING** | submit buttons, Add to Cart, Save, Delete, Upload, Post, Checkout, Buy, Place Order | **FIRST** |
+| **INTERACTIVE** | tabs, modal opens, accordions, combobox opens, profile/account menus | after mutating |
+| **NAVIGATION** | "Home", "About", "Help", language selectors, menu items that only navigate | DO NOT include — BFS handles navigation separately |
+
+Always include the form submit in the same form task — never split fill from
+submit. Pentest goal is state-changing API coverage, not reading pages.
+
+### Out-of-Scope Filter
+If the input includes \`outOfScope\` (array of label strings), NEVER plan a
+task whose label matches any entry. Use semantic matching:
+- "Delete Account" also matches: "Remove Account", "Close Account",
+  "Permanently Delete User", "Delete My Profile"
+- "Cancel Subscription" also matches: "End Subscription", "Unsubscribe"
+- Do NOT over-match: "Delete Account" does NOT match "Delete Item",
+  "Delete Comment", "Delete Post" (those are item-level, not account-level)
+
+If every plannable task is out-of-scope, return an empty tasks array.
+
+### Page State (Journey Awareness)
+Classify the current page and set three response fields:
+
+- **pageState**: \`"populated"\` | \`"empty"\` | \`"unknown"\`
+  - \`"empty"\` — the page is a LIST / COLLECTION / FEED with NO DATA:
+    * Empty cart with only "Continue Shopping" button
+    * Empty order history with only "Shop now" CTA
+    * Empty user list with only "Invite users" button
+    * Empty feed with "Follow people to see posts"
+  - \`"populated"\` — the page has real content: list items, cart items,
+    feed posts, dashboard charts
+  - \`"unknown"\` — genuinely ambiguous (mixed content, pre-hydration,
+    uncertain structure). This is the SAFE DEFAULT. Do NOT use as
+    conservative bet when you can tell.
+
+  FORMS are NEVER "empty" when they are self-contained (login, settings,
+  registration — these have input fields, which are content).
+
+  EXCEPTION — Form with a required data-dependency that is unfulfilled:
+  A form that REQUIRES choosing from a list of items, and that list is
+  EMPTY (or the form cannot be submitted because of missing dependency
+  data). Classify this as "empty".
+  ✓ Product-review form with empty product dropdown → empty
+    (revisitOn: "product-created")
+  ✓ Task assignment form with no assignable users → empty
+    (revisitOn: "user-created")
+  ✓ Order form requiring items but inventory is empty → empty
+    (revisitOn: "item-created")
+  ✗ Login form with no username yet typed → NOT empty (user input, not
+    a data dependency)
+  ✗ Settings form → NOT empty (self-contained, no external dependency)
+
+  CLASSIFY ON PRIMARY PAGE CONTENT, NOT nav bar / badges / counters:
+  ✗ A Home page with "Cart (0)" in the nav bar is NOT "empty" — the
+    count is a nav indicator, not the page's primary purpose.
+  ✗ A landing page with a "View Cart" button is NOT "empty" — the button
+    is navigation, not content. Classify this as "populated" (or "unknown").
+  ✗ A dashboard showing "0 notifications" widget is NOT "empty" — the
+    dashboard itself has widgets as content.
+
+  URL HINT: "empty" typically applies when the URL path explicitly
+  identifies a collection view (e.g. /cart, /basket, /orders, /notifications,
+  /messages). Home/root/landing URLs (e.g. /, /#/, /home, /dashboard)
+  are rarely "empty" regardless of nav-bar counters.
+
+- **revisitAfter**: \`"any-mutation"\` when pageState is "empty" AND the page
+  would likely show content after a mutation elsewhere (add-to-cart,
+  invite-user, first-post). Otherwise \`null\`.
+
+- **revisitReason**: REQUIRED when pageState is "empty". One short sentence
+  explaining what mutation would populate this page.
+
+- **revisitOn** (optional but RECOMMENDED when pageState is "empty"): A short
+  mutation keyword in kebab-case identifying the class of action that would
+  populate THIS page. Use domain nouns + verbs, not endpoint paths or IDs.
+
+  Good keywords (consistent vocabulary):
+  - "cart-item-added", "cart-item-removed"
+  - "user-created", "user-invited"
+  - "post-created", "post-published"
+  - "order-placed", "order-cancelled"
+  - "comment-posted", "review-submitted"
+  - "file-uploaded", "address-saved"
+
+  Bad keywords (too specific / inconsistent):
+  - "POST /api/basket/items" (endpoint, not semantic)
+  - "user-id-42-created" (includes IDs)
+  - "thing-added" (too vague)
+
+  When a page on a LATER visit plans a task that would trigger THIS
+  mutation, set \`triggersMutation\` on that task to the SAME keyword:
+  \`"triggersMutation": "cart-item-added"\`. The system uses exact string
+  match, so use the same spelling/casing consistently across the crawl.
+
+  Omitting \`revisitOn\` falls back to "any successful mutation drains this
+  URL" (backward-compat behavior). Targeted matching is strictly more
+  efficient; use it when you can identify the class confidently.
+
+Omit these fields entirely when uncertain — the system defaults to
+\`unknown\`/\`null\` (no revisit triggered).
+
+### Task ordering within the array
+1. Mutating tasks (forms, Add to Cart, Save, etc.)
+2. Interactive reveals (menus, tabs, accordions)
+3. Account/user menus (reveal hidden sub-navigation)
+
+## Fill Values
+
+| Field | Value |
+|---|---|
+| email | test@example.com |
+| password | TestPassword123! |
+| username, login | testuser |
+| name | Test User |
+| phone | +15550001234 |
+| address | 123 Main St |
+| city | New York |
+| zip, postal | 10001 |
+| date | 2000-01-01 |
+| number, age | 25 |
+| url | https://example.com |
+| search, query | test |
+| message, notes, comment | Test input for security scan |
+| answer, security answer | Test Answer |
+| slider, range | 3 |
+| CAPTCHA | compute from [info] element |
+| unknown | test |
+
+## IMPORTANT
+Always respond with a valid JSON object. If there is nothing to explore, return: {"tasks":[]}
 `;
 
 // src/navigator.ts
-var log3 = Log.create({ service: "hackbrowser:navigator" });
+var log4 = Log.create({ service: "hackbrowser:navigator" });
 function isAuthError(err) {
   if (!err || typeof err !== "object")
     return false;
@@ -35890,20 +36095,20 @@ var cachedModel = null;
 async function resolveModel(override) {
   if (override) {
     cachedModel = override;
-    log3.info("model resolved via opts.model (cyberstrike injection)");
+    log4.info("model resolved via opts.model (cyberstrike injection)");
     return cachedModel;
   }
   if (cachedModel)
     return cachedModel;
   if (process.env.ANTHROPIC_API_KEY) {
     const model = process.env.BROWSER_AGENT_MODEL ?? "claude-sonnet-4-6";
-    log3.info("model resolved via ANTHROPIC_API_KEY", { model });
+    log4.info("model resolved via ANTHROPIC_API_KEY", { model });
     cachedModel = createAnthropic2({ apiKey: process.env.ANTHROPIC_API_KEY })(model);
     return cachedModel;
   }
   if (process.env.OPENAI_API_KEY) {
     const model = process.env.BROWSER_AGENT_MODEL ?? "gpt-4o";
-    log3.info("model resolved via OPENAI_API_KEY", { model });
+    log4.info("model resolved via OPENAI_API_KEY", { model });
     cachedModel = createOpenAI2({ apiKey: process.env.OPENAI_API_KEY })(model);
     return cachedModel;
   }
@@ -35929,7 +36134,7 @@ async function planPage(snapshot, model, usageAcc) {
       usageAcc.cacheReadTokens += result.usage.cachedInputTokens ?? 0;
     }
     const raw = result.text.trim();
-    log3.debug("planner response", { length: raw.length, raw: raw.slice(0, 500) });
+    log4.debug("planner response", { length: raw.length, raw: raw.slice(0, 500) });
     const start = raw.indexOf("{");
     const end = raw.lastIndexOf("}");
     if (start === -1 || end === -1)
@@ -35939,18 +36144,18 @@ async function planPage(snapshot, model, usageAcc) {
   };
   try {
     const plan = await attempt();
-    log3.debug("page plan", { tasks: plan.tasks.length });
+    log4.debug("page plan", { tasks: plan.tasks.length });
     return plan;
   } catch (err) {
     if (isAuthError(err))
       throw err;
-    log3.warn("planPage failed, retrying once", { err: String(err) });
+    log4.warn("planPage failed, retrying once", { err: String(err) });
     try {
       return await attempt();
     } catch (err2) {
       if (isAuthError(err2))
         throw err2;
-      log3.error("planPage failed after retry, returning empty plan", { err: String(err2) });
+      log4.error("planPage failed after retry, returning empty plan", { err: String(err2) });
       return { tasks: [] };
     }
   }
@@ -35986,7 +36191,7 @@ async function planUnexploredElements(snapshot, unexploredLabels, model, usageAc
       usageAcc.cacheReadTokens += result.usage.cachedInputTokens ?? 0;
     }
     const raw = result.text.trim();
-    log3.debug("unexplored planner response", { length: raw.length, raw: raw.slice(0, 500) });
+    log4.debug("unexplored planner response", { length: raw.length, raw: raw.slice(0, 500) });
     const start = raw.indexOf("{");
     const end = raw.lastIndexOf("}");
     if (start === -1 || end === -1)
@@ -35996,42 +36201,42 @@ async function planUnexploredElements(snapshot, unexploredLabels, model, usageAc
   };
   try {
     const plan = await attempt();
-    log3.debug("unexplored plan", { tasks: plan.tasks.length });
+    log4.debug("unexplored plan", { tasks: plan.tasks.length });
     return plan;
   } catch (err) {
     if (isAuthError(err))
       throw err;
-    log3.warn("planUnexploredElements failed", { err: String(err) });
+    log4.warn("planUnexploredElements failed", { err: String(err) });
     return { tasks: [] };
   }
 }
 function validatePlan(raw) {
-  if (!Array.isArray(raw["tasks"]))
+  if (!Array.isArray(raw.tasks))
     return { tasks: [] };
   const tasks = [];
-  for (const t of raw["tasks"]) {
+  for (const t of raw.tasks) {
     const task = t;
-    const triggersMutation = typeof task["triggersMutation"] === "string" && task["triggersMutation"].length > 0 ? task["triggersMutation"] : undefined;
-    if (task["type"] === "form") {
-      const fields = Array.isArray(task["fields"]) ? task["fields"].map((f) => ({
-        role: String(f["role"] ?? ""),
-        label: String(f["label"] ?? ""),
-        value: String(f["value"] ?? "")
+    const triggersMutation = typeof task.triggersMutation === "string" && task.triggersMutation.length > 0 ? task.triggersMutation : undefined;
+    if (task.type === "form") {
+      const fields = Array.isArray(task.fields) ? task.fields.map((f) => ({
+        role: String(f.role ?? ""),
+        label: String(f.label ?? ""),
+        value: String(f.value ?? "")
       })) : [];
-      const sub = task["submit"];
+      const sub = task.submit;
       if (fields.length > 0 && sub) {
         tasks.push({
           type: "form",
           fields,
-          submit: { role: String(sub["role"] ?? "button"), label: String(sub["label"] ?? "") },
+          submit: { role: String(sub.role ?? "button"), label: String(sub.label ?? "") },
           triggersMutation
         });
       }
-    } else if (task["type"] === "click") {
-      const role = String(task["role"] ?? "");
-      const label = String(task["label"] ?? "");
+    } else if (task.type === "click") {
+      const role = String(task.role ?? "");
+      const label = String(task.label ?? "");
       if (role && label) {
-        tasks.push({ type: "click", role, label, reason: task["reason"], triggersMutation });
+        tasks.push({ type: "click", role, label, reason: task.reason, triggersMutation });
       }
     }
   }
@@ -36039,26 +36244,26 @@ function validatePlan(raw) {
 }
 function validateIntelligence(raw) {
   const out = {};
-  const ps = raw["pageState"];
+  const ps = raw.pageState;
   if (ps === "populated" || ps === "empty" || ps === "unknown") {
     out.pageState = ps;
   }
-  const ra = raw["revisitAfter"];
+  const ra = raw.revisitAfter;
   if (ra === "any-mutation") {
     out.revisitAfter = "any-mutation";
   } else if (ra === null) {
     out.revisitAfter = null;
   }
-  const reason = raw["revisitReason"];
+  const reason = raw.revisitReason;
   if (typeof reason === "string" && reason.length > 0) {
     out.revisitReason = reason;
   }
-  const on = raw["revisitOn"];
+  const on = raw.revisitOn;
   if (typeof on === "string" && on.length > 0) {
     out.revisitOn = on;
   }
   if (out.pageState === "empty" && !out.revisitReason) {
-    log3.warn("pageState='empty' without revisitReason — downgrading to 'unknown'");
+    log4.warn("pageState='empty' without revisitReason — downgrading to 'unknown'");
     out.pageState = "unknown";
     out.revisitAfter = null;
     out.revisitOn = undefined;
@@ -36066,1051 +36271,32 @@ function validateIntelligence(raw) {
   return out;
 }
 
-// src/state.ts
-function createGlobalState(opts) {
-  return {
-    visitedPages: new Set,
-    capturedEndpoints: new Set,
-    authPhase: "anonymous",
-    totalSteps: 0,
-    pageQueue: [],
-    deferredAuthPages: [],
-    pendingReDiscovery: false,
-    pathPatternCounts: new Map,
-    outOfScope: opts?.outOfScope ?? [],
-    intelligenceByCredential: new Map
-  };
+// src/panel/emit.ts
+var enabled = true;
+function setPanelEnabled(value) {
+  enabled = value;
 }
-var SINGLE_CRED = "__single__";
-function getIntelligence(state, credId) {
-  let intel = state.intelligenceByCredential.get(credId);
-  if (!intel) {
-    intel = {
-      emptyStateQueue: new Map,
-      revisitCount: new Map,
-      pageFingerprints: new Map
-    };
-    state.intelligenceByCredential.set(credId, intel);
-  }
-  return intel;
+var eventSink = null;
+function setEventSink(sink2) {
+  eventSink = sink2;
 }
-var MAX_REVISITS_PER_URL = 2;
-var ANY_MUTATION = "*";
-function markPageEmpty(state, credId, url2, expectedMutation) {
-  const intel = getIntelligence(state, credId);
-  const count = intel.revisitCount.get(url2) ?? 0;
-  if (count >= MAX_REVISITS_PER_URL)
-    return false;
-  intel.emptyStateQueue.set(url2, expectedMutation ?? ANY_MUTATION);
-  return true;
+function clearEventSink() {
+  eventSink = null;
 }
-function drainOnMutation(state, credId, taskMutation) {
-  const intel = getIntelligence(state, credId);
-  if (intel.emptyStateQueue.size === 0)
-    return [];
-  const drained = [];
-  for (const [url2, expected] of intel.emptyStateQueue) {
-    const matches = expected === ANY_MUTATION || taskMutation !== undefined && expected === taskMutation;
-    if (!matches)
-      continue;
-    state.pageQueue.unshift(url2);
-    intel.revisitCount.set(url2, (intel.revisitCount.get(url2) ?? 0) + 1);
-    intel.pageFingerprints.delete(url2);
-    drained.push(url2);
-  }
-  for (const url2 of drained)
-    intel.emptyStateQueue.delete(url2);
-  return drained;
-}
-function hasSuccessfulMutation(httpRequests) {
-  if (!httpRequests?.length)
-    return false;
-  for (const line of httpRequests) {
-    const match = line.match(/^(POST|PUT|PATCH|DELETE)\s+\S+\s+\[(\d+)\]/);
-    if (!match)
-      continue;
-    const status = parseInt(match[2], 10);
-    if (status >= 200 && status < 300)
-      return true;
-  }
-  return false;
-}
-var AUTH_PATTERNS = [
-  { type: "register", pattern: /\/(register|signup|sign-up|create-account|join)/i },
-  { type: "login", pattern: /\/(login|signin|sign-in|authenticate|auth\/login)/i },
-  { type: "logout", pattern: /\/(logout|signout|sign-out|auth\/logout)/i }
-];
-function classifyAuthUrl(url2) {
-  try {
-    const u = new URL(url2);
-    const path = u.pathname + u.hash;
-    for (const { type, pattern } of AUTH_PATTERNS) {
-      if (pattern.test(path))
-        return type;
-    }
-  } catch {}
-  return null;
-}
-var INPUT_ROLES = new Set(["textbox", "combobox", "checkbox", "radio", "slider"]);
-var ACTION_ROLES = new Set(["button", "menuitem", "tab"]);
-function generateFingerprint(elements) {
-  return elements.filter((e) => INPUT_ROLES.has(e.role) || ACTION_ROLES.has(e.role) && !e.inChrome).map((e) => `${e.role}:${e.label}:${e.type}:${e.enabled}`).sort().join("|");
-}
-function generateFullFingerprint(elements) {
-  return elements.filter((e) => e.label && e.role !== "link" && e.role !== "info").map((e) => [e.role, e.label, e.type, e.enabled, e.options || "", e.placeholder || ""].join(":")).sort().join("|");
-}
-function computeElementAvailability(elementsByContext) {
-  const availability = new Map;
-  for (const [ctxId, elements] of elementsByContext) {
-    for (const el of elements) {
-      const key = `${el.role}::${el.label}`;
-      if (!availability.has(key))
-        availability.set(key, []);
-      availability.get(key).push(ctxId);
-    }
-  }
-  return availability;
-}
-function normalizeUrl(url2) {
-  try {
-    const u = new URL(url2);
-    u.searchParams.sort();
-    let path = u.pathname.replace(/\/+$/, "") || "/";
-    let hash = u.hash;
-    if (hash && hash !== "#" && !hash.startsWith("#/")) {
-      hash = "#/" + hash.slice(1);
-    }
-    hash = hash.replace(/\/+$/, "");
-    if (hash === "#")
-      hash = "";
-    return u.origin + path + u.search + hash;
-  } catch {
-    return url2;
-  }
-}
-function elementToPrompt(el) {
-  const result = {
-    id: el.id,
-    role: el.role,
-    label: el.label
-  };
-  if (el.type)
-    result.type = el.type;
-  if (el.value)
-    result.value = el.value;
-  if (el.placeholder)
-    result.placeholder = el.placeholder;
-  if (el.options)
-    result.options = el.options;
-  if (el.constraints)
-    result.constraints = el.constraints;
-  if (!el.enabled)
-    result.enabled = false;
-  if (el.href) {
+async function csEmit(page, event) {
+  if (eventSink) {
     try {
-      const u = new URL(el.href);
-      result.href = u.pathname + u.hash;
-    } catch {
-      result.href = el.href;
+      eventSink(event);
+    } catch (err) {
+      console.error("[hackbrowser:emit] eventSink threw, swallowing:", err);
     }
   }
-  return result;
-}
-function buildPlannerSnapshot(url2, elements, globalState, credId, viewportCenterBlocked, occlusions) {
-  const promptElements = elements.map(elementToPrompt);
-  if (occlusions && occlusions.length > 0) {
-    for (const occ of occlusions) {
-      const match = promptElements.find((e) => e.label === occ.label && e.role === occ.role);
-      if (match)
-        match.occludedBy = occ.occluderText;
-    }
-  }
-  const snapshot = {
-    url: url2,
-    viewportCenterBlocked,
-    totalPagesVisited: globalState.visitedPages.size,
-    elements: promptElements
-  };
-  if (globalState.outOfScope.length > 0) {
-    snapshot.outOfScope = [...globalState.outOfScope];
-  }
-  const intel = getIntelligence(globalState, credId);
-  const pending = new Set;
-  for (const kw of intel.emptyStateQueue.values()) {
-    if (kw !== ANY_MUTATION)
-      pending.add(kw);
-  }
-  if (pending.size > 0) {
-    snapshot.pendingMutations = [...pending];
-  }
-  return snapshot;
-}
-
-// src/scanner.ts
-var log4 = Log.create({ service: "hackbrowser:scanner" });
-var MAX_ELEMENTS = 50;
-var MAX_PER_TEMPLATE = 5;
-var REVEAL_MAX_STEPS = 10;
-var REVEAL_STEP_WAIT = 250;
-var EXPAND_MAX = 20;
-async function collectInteractiveElements(page) {
-  return page.evaluate(() => {
-    const FRAMEWORK_CLICK_ATTRS = [
-      "wire:click",
-      "hx-get",
-      "hx-post",
-      "hx-put",
-      "hx-patch",
-      "hx-delete",
-      "ng-click",
-      "x-on:click",
-      "@click",
-      "data-toggle",
-      "data-bs-toggle",
-      "data-hx-get",
-      "data-hx-post",
-      "data-hx-put",
-      "data-hx-patch",
-      "data-hx-delete",
-      "data-ng-click"
-    ];
-    function isStructurallyVisible(el) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 && rect.height === 0)
-        return false;
-      const style = window.getComputedStyle(el);
-      if (style.display === "none")
-        return false;
-      if (style.visibility === "hidden")
-        return false;
-      const tag = el.tagName.toLowerCase();
-      const isFormControl = tag === "input" || tag === "select" || tag === "textarea";
-      if (parseFloat(style.opacity) === 0 && !isFormControl)
-        return false;
-      if (el.getAttribute("aria-hidden") === "true")
-        return false;
-      if (style.pointerEvents === "none" && !el.disabled)
-        return false;
-      return true;
-    }
-    function getLabel(el) {
-      const ariaLabel = el.getAttribute("aria-label")?.trim();
-      if (ariaLabel) {
-        const childText = el.innerText?.trim();
-        if (childText && childText.length > 5 && childText.length < 80 && childText !== ariaLabel) {
-          return `${ariaLabel} — ${childText}`;
-        }
-        return ariaLabel;
-      }
-      const ariaLabelledBy = el.getAttribute("aria-labelledby");
-      if (ariaLabelledBy) {
-        const labelEl = document.getElementById(ariaLabelledBy);
-        if (labelEl?.textContent?.trim())
-          return labelEl.textContent.trim();
-      }
-      const id = el.getAttribute("id");
-      if (id) {
-        const labelEl = document.querySelector(`label[for="${id}"]`);
-        if (labelEl?.textContent?.trim())
-          return labelEl.textContent.trim();
-      }
-      const text2 = el.innerText?.trim();
-      if (text2 && text2.length < 80)
-        return text2;
-      const parentLabel = el.closest?.("label");
-      if (parentLabel && !parentLabel.isSameNode(el)) {
-        const parentText = parentLabel.textContent?.trim();
-        if (parentText && parentText.length < 80)
-          return parentText;
-      }
-      const placeholder = el.placeholder;
-      if (placeholder)
-        return placeholder;
-      if (el.tagName.toLowerCase() === "input") {
-        const itype = el.type?.toLowerCase();
-        if (itype === "image") {
-          const alt = el.getAttribute("alt")?.trim();
-          if (alt)
-            return alt;
-        }
-        if (itype === "submit" || itype === "button" || itype === "image") {
-          const val = el.value?.trim();
-          if (val)
-            return val;
-        }
-      }
-      const root = el.getRootNode();
-      if (root instanceof ShadowRoot && root.host) {
-        const host = root.host;
-        const hostAria = host.getAttribute("aria-label")?.trim();
-        if (hostAria)
-          return hostAria;
-        const hostLabelAttr = host.getAttribute("label")?.trim();
-        if (hostLabelAttr)
-          return hostLabelAttr;
-        const hostText = host.innerText?.trim();
-        if (hostText && hostText.length < 80)
-          return hostText;
-      }
-      const name19 = el.getAttribute("name") || el.getAttribute("data-testid");
-      if (name19)
-        return name19;
-      return "";
-    }
-    function getRole(el) {
-      const explicit = el.getAttribute("role");
-      if (explicit)
-        return explicit.toLowerCase();
-      const tag = el.tagName.toLowerCase();
-      const type = el.type?.toLowerCase();
-      if (tag === "button")
-        return "button";
-      if (tag === "summary")
-        return "button";
-      if (tag === "a" && el.getAttribute("href"))
-        return "link";
-      if (tag === "input") {
-        if (type === "submit" || type === "button" || type === "image")
-          return "button";
-        if (type === "checkbox")
-          return "checkbox";
-        if (type === "radio")
-          return "radio";
-        if (type === "hidden")
-          return "";
-        if (type === "range")
-          return "slider";
-        return "textbox";
-      }
-      if (tag === "textarea")
-        return "textbox";
-      if (tag === "select")
-        return "combobox";
-      if (tag === "li" && el.closest("[role=menu],[role=listbox]"))
-        return "menuitem";
-      if (el.hasAttribute("onclick"))
-        return "button";
-      for (const a of FRAMEWORK_CLICK_ATTRS)
-        if (el.hasAttribute(a))
-          return "button";
-      return "";
-    }
-    function isEphemeralId(id) {
-      if (/^:/.test(id) || /:r[0-9a-z]+:/i.test(id))
-        return true;
-      return /^(mui-\d|radix-|headlessui-|react-aria-|rc-_?\d|ember\d)/i.test(id);
-    }
-    function buildCSSSelectorCandidate(el) {
-      const tag = el.tagName.toLowerCase();
-      const id = el.getAttribute("id");
-      if (id && !isEphemeralId(id))
-        return `${tag}#${CSS.escape(id)}`;
-      const name19 = el.getAttribute("name");
-      if (name19)
-        return `${tag}[name="${CSS.escape(name19)}"]`;
-      function ancestorPrefix(el2) {
-        let current = el2.parentElement;
-        while (current && current !== document.documentElement) {
-          const aTag = current.tagName.toLowerCase();
-          const aId = current.getAttribute("id");
-          if (aId && !isEphemeralId(aId))
-            return `${aTag}#${CSS.escape(aId)} `;
-          const aCls = typeof current.className === "string" ? current.className.trim().split(/\s+/).filter((c) => c.length > 2)[0] : undefined;
-          if (aCls)
-            return `${aTag}.${CSS.escape(aCls)} `;
-          current = current.parentElement;
-        }
-        return "";
-      }
-      const cls = el.className;
-      if (typeof cls === "string" && cls.trim()) {
-        const classes = cls.trim().split(/\s+/).filter((c) => c.length > 2);
-        if (classes.length > 0) {
-          const clsSel = `${tag}.${CSS.escape(classes[0])}`;
-          const parent2 = el.parentElement;
-          if (parent2) {
-            const siblings = Array.from(parent2.querySelectorAll(`:scope > ${clsSel}`));
-            const idx = siblings.indexOf(el);
-            if (idx >= 0)
-              return `${ancestorPrefix(el)}${clsSel}:nth-of-type(${idx + 1})`;
-          }
-          return clsSel;
-        }
-      }
-      const parent = el.parentElement;
-      if (parent) {
-        const siblings = Array.from(parent.querySelectorAll(`:scope > ${tag}`));
-        const idx = siblings.indexOf(el);
-        if (idx >= 0) {
-          const nthSel = `${tag}:nth-of-type(${idx + 1})`;
-          return `${ancestorPrefix(el)}${nthSel}`;
-        }
-      }
-      return tag;
-    }
-    function uniquePositionalPath(el) {
-      const segs = [];
-      let cur = el;
-      while (cur && cur !== document.documentElement) {
-        const tag = cur.tagName.toLowerCase();
-        const id = cur.getAttribute("id");
-        if (id && !isEphemeralId(id)) {
-          segs.unshift(`${tag}#${CSS.escape(id)}`);
-          break;
-        }
-        const parent = cur.parentElement;
-        if (!parent) {
-          segs.unshift(tag);
-          break;
-        }
-        const sameTag = Array.from(parent.children).filter((c) => c.tagName === cur.tagName);
-        segs.unshift(sameTag.length > 1 ? `${tag}:nth-of-type(${sameTag.indexOf(cur) + 1})` : tag);
-        cur = parent;
-      }
-      return segs.join(" > ");
-    }
-    function buildCSSSelector(el) {
-      const candidate = buildCSSSelectorCandidate(el);
-      try {
-        if (document.querySelectorAll(candidate).length === 1)
-          return candidate;
-      } catch {}
-      return uniquePositionalPath(el);
-    }
-    const INTERACTIVE_SELECTORS = [
-      "button",
-      "a[href]",
-      "input:not([type=hidden]):not([disabled])",
-      "textarea:not([disabled])",
-      "select:not([disabled])",
-      "[role=button]",
-      "[role=link]",
-      "[role=menuitem]",
-      "[role=tab]",
-      "[role=checkbox]",
-      "[role=radio]",
-      "[role=combobox]",
-      "[role=option]",
-      "[role=slider]",
-      "[onclick]",
-      "summary",
-      ...FRAMEWORK_CLICK_ATTRS.map((a) => `[${CSS.escape(a)}]`)
-    ].join(", ");
-    function queryAllDeep(selector) {
-      const out = [];
-      const walk = (root) => {
-        for (const el of root.querySelectorAll(selector))
-          out.push(el);
-        for (const host of root.querySelectorAll("*")) {
-          if (host.closest("[data-cyberstrike-ui]"))
-            continue;
-          const sr = host.shadowRoot;
-          if (sr)
-            walk(sr);
-        }
-      };
-      walk(document);
-      return out;
-    }
-    function serializeConstraints(el, type) {
-      const tag = el.tagName.toLowerCase();
-      if (tag !== "input" && tag !== "textarea")
-        return "";
-      const parts = [];
-      const getAttr = (name19) => el.getAttribute(name19)?.trim() ?? "";
-      const min = getAttr("min");
-      const max = getAttr("max");
-      const step = getAttr("step");
-      const maxlength = getAttr("maxlength");
-      const minlength = getAttr("minlength");
-      const pattern = getAttr("pattern");
-      const isNumericRange = type === "range" || type === "number";
-      const isDateTime = type === "date" || type === "time" || type === "datetime-local" || type === "month" || type === "week";
-      if (isNumericRange || isDateTime) {
-        if (min)
-          parts.push(`min:${min}`);
-        if (max)
-          parts.push(`max:${max}`);
-        if (isNumericRange && step && step !== "any")
-          parts.push(`step:${step}`);
-      }
-      if ((tag === "textarea" || ["text", "email", "url", "tel", "password", "search"].includes(type)) && maxlength) {
-        parts.push(`maxlength:${maxlength}`);
-      }
-      if (minlength)
-        parts.push(`minlength:${minlength}`);
-      if (pattern)
-        parts.push(`pattern:${pattern}`);
-      if (["email", "url", "tel"].includes(type))
-        parts.push(`type:${type}`);
-      return parts.join(" ");
-    }
-    const elements = [];
-    const seenCount = new Map;
-    const seenRoleSelectors = new Map;
-    function addElement(el, role, syntheticRole = false) {
-      const label = getLabel(el);
-      const tag = el.tagName.toLowerCase();
-      const type = el.type?.toLowerCase() || "";
-      const rawHref = (el.getAttribute("href") || "").trim();
-      const navigates = !!rawHref && rawHref !== "#" && !rawHref.startsWith("#") && !rawHref.startsWith("javascript:");
-      const href = navigates ? el.href || "" : "";
-      const nonNavAnchor = tag === "a" && !navigates;
-      if (nonNavAnchor)
-        role = "button";
-      const isSlider = role === "slider";
-      const value = isSlider ? el.getAttribute("aria-valuenow") ?? el.value ?? "" : el.value || "";
-      const placeholder = el.placeholder || "";
-      const enabled = !el.disabled;
-      const options = tag === "select" ? Array.from(el.querySelectorAll("option")).map((o) => o.textContent?.trim() || "").filter(Boolean).slice(0, 10).join(", ") : "";
-      const constraints = serializeConstraints(el, type);
-      const innerText = el.innerText?.trim().slice(0, 40) || "";
-      const dedupKey = `${role}::${label}::${href}::${innerText}`;
-      const count = (seenCount.get(dedupKey) ?? 0) + 1;
-      seenCount.set(dedupKey, count);
-      if (count > 3)
-        return;
-      const disambiguatedLabel = count > 1 ? `${label} (${count})` : label;
-      const ariaLabelRaw = (el.getAttribute("aria-label") || "").trim();
-      const safeAriaLabel = ariaLabelRaw.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
-      const isFileInput = el.matches("input[type=file]");
-      const selectorRole = syntheticRole || count > 1 || isFileInput || nonNavAnchor ? "" : safeAriaLabel ? `role=${role}[name="${safeAriaLabel}"]` : `role=${role}`;
-      const selectorCSS = buildCSSSelector(el);
-      const inChrome = !!el.closest("nav, header, footer, aside, [role=navigation], [role=banner], [role=contentinfo], [role=complementary]");
-      const roleCount = (seenRoleSelectors.get(selectorRole) ?? 0) + 1;
-      seenRoleSelectors.set(selectorRole, roleCount);
-      elements.push({
-        tag,
-        role,
-        label: disambiguatedLabel,
-        value,
-        enabled,
-        href,
-        type,
-        placeholder,
-        options,
-        constraints,
-        selectorRole,
-        selectorCSS,
-        inChrome
-      });
-    }
-    for (const el of queryAllDeep(INTERACTIVE_SELECTORS)) {
-      if (el.closest("[data-cyberstrike-ui]"))
-        continue;
-      const role = getRole(el);
-      if (!role)
-        continue;
-      const isSlider = role === "slider";
-      if (!isSlider && !isStructurallyVisible(el))
-        continue;
-      addElement(el, role);
-    }
-    for (const el of queryAllDeep("div, span, li")) {
-      if (el.closest("[data-cyberstrike-ui]"))
-        continue;
-      if (el.getAttribute("role"))
-        continue;
-      if (el.hasAttribute("onclick"))
-        continue;
-      if (!isStructurallyVisible(el))
-        continue;
-      const text2 = el.innerText?.trim() || "";
-      if (!text2 || text2.length > 80)
-        continue;
-      if (el.querySelector(INTERACTIVE_SELECTORS))
-        continue;
-      if (window.getComputedStyle(el).cursor !== "pointer")
-        continue;
-      const parent = el.parentElement;
-      if (parent && window.getComputedStyle(parent).cursor === "pointer")
-        continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.width >= window.innerWidth * 0.9 && rect.height >= window.innerHeight * 0.5)
-        continue;
-      addElement(el, "button", true);
-    }
-    const INTERACTIVE_TAGS = new Set(["input", "button", "a", "select", "textarea"]);
-    const INTERACTIVE_ROLES = new Set([
-      "button",
-      "link",
-      "menuitem",
-      "tab",
-      "checkbox",
-      "radio",
-      "combobox",
-      "option",
-      "slider",
-      "textbox"
-    ]);
-    const infoSeen = new Set;
-    const interactiveLabels = new Set(elements.map((e) => e.label.toLowerCase()));
-    for (const el of document.querySelectorAll("[aria-label]")) {
-      if (el.closest("[data-cyberstrike-ui]"))
-        continue;
-      const tag = el.tagName.toLowerCase();
-      const role = (el.getAttribute("role") || "").toLowerCase();
-      if (INTERACTIVE_TAGS.has(tag) || INTERACTIVE_ROLES.has(role))
-        continue;
-      if (!isStructurallyVisible(el))
-        continue;
-      const ariaLabel = el.getAttribute("aria-label")?.trim();
-      if (!ariaLabel)
-        continue;
-      if (interactiveLabels.has(ariaLabel.toLowerCase()))
-        continue;
-      const text2 = el.innerText?.trim() || el.textContent?.trim() || "";
-      if (!text2 || text2.length > 150)
-        continue;
-      const key = `info::${ariaLabel}`;
-      if (infoSeen.has(key))
-        continue;
-      infoSeen.add(key);
-      elements.push({
-        tag,
-        role: "info",
-        label: ariaLabel,
-        value: text2,
-        enabled: false,
-        href: "",
-        type: "",
-        placeholder: "",
-        options: "",
-        constraints: "",
-        selectorRole: "",
-        selectorCSS: "",
-        inChrome: false
-      });
-    }
-    for (const el of elements) {
-      if (el.selectorRole && seenRoleSelectors.get(el.selectorRole) > 1 && el.selectorCSS) {
-        el.selectorRole = "";
-      }
-    }
-    return elements;
-  });
-}
-function assignIds(browserElements, startId) {
-  return browserElements.map((el, i) => ({
-    id: `E${startId + i}`,
-    tag: el.tag,
-    role: el.role,
-    label: el.label,
-    value: el.value,
-    enabled: el.enabled,
-    href: el.href,
-    type: el.type,
-    placeholder: el.placeholder,
-    options: el.options,
-    constraints: el.constraints,
-    selector: el.selectorRole.includes("[name=") ? el.selectorRole : el.selectorCSS || el.selectorRole,
-    inChrome: el.inChrome
-  }));
-}
-async function collectElements(page) {
-  const browserElements = await collectInteractiveElements(page);
-  const sampled = capElements(sampleTemplates(browserElements));
-  return assignIds(sampled, 1);
-}
-var ACTION_ROLES_CAP = new Set(["button", "link", "menuitem", "tab"]);
-function capElements(els) {
-  if (els.length <= MAX_ELEMENTS)
-    return els;
-  const actions = els.filter((e) => ACTION_ROLES_CAP.has(e.role));
-  const rest = els.filter((e) => !ACTION_ROLES_CAP.has(e.role));
-  const kept = new Set([...actions, ...rest].slice(0, MAX_ELEMENTS));
-  return els.filter((e) => kept.has(e));
-}
-function sampleTemplates(elements) {
-  const clusterCount = new Map;
-  const out = [];
-  for (const el of elements) {
-    const masked = el.label.replace(/\d+/g, "#");
-    if (masked === el.label) {
-      out.push(el);
-      continue;
-    }
-    const key = `${el.role}::${masked}`;
-    const n = (clusterCount.get(key) ?? 0) + 1;
-    clusterCount.set(key, n);
-    if (n <= MAX_PER_TEMPLATE)
-      out.push(el);
-  }
-  return out;
-}
-async function revealLazyContent(page) {
-  try {
-    for (let i = 0;i < REVEAL_MAX_STEPS; i++) {
-      const advanced = await page.evaluate(() => {
-        const before = window.scrollY;
-        window.scrollBy(0, Math.round(window.innerHeight * 0.9));
-        return window.scrollY > before;
-      });
-      await page.waitForTimeout(REVEAL_STEP_WAIT);
-      if (!advanced)
-        break;
-    }
-    await page.evaluate(() => window.scrollTo(0, 0));
-    await page.waitForTimeout(REVEAL_STEP_WAIT);
-  } catch {}
-}
-async function expandDisclosures(page) {
-  try {
-    await page.evaluate((max) => {
-      let budget = max;
-      for (const d of Array.from(document.querySelectorAll("details:not([open])"))) {
-        if (budget <= 0)
-          break;
-        if (d.closest("[data-cyberstrike-ui]"))
-          continue;
-        d.open = true;
-        budget--;
-      }
-      for (const c of Array.from(document.querySelectorAll('[aria-expanded="false"]'))) {
-        if (budget <= 0)
-          break;
-        if (c.closest("[data-cyberstrike-ui]"))
-          continue;
-        if (c.getAttribute("role") === "tab")
-          continue;
-        if (c.hasAttribute("aria-haspopup") && c.getAttribute("aria-haspopup") !== "false")
-          continue;
-        c.click();
-        budget--;
-      }
-    }, EXPAND_MAX);
-    await page.waitForTimeout(REVEAL_STEP_WAIT);
-  } catch {}
-}
-async function isViewportCenterBlocked(page) {
-  try {
-    return await evalIsViewportCenterBlocked(page);
-  } catch (err) {
-    const msg = String(err?.message ?? err);
-    if (msg.includes("Execution context was destroyed") || msg.includes("Target closed")) {
-      return false;
-    }
-    throw err;
-  }
-}
-function evalIsViewportCenterBlocked(page) {
-  return page.evaluate(() => {
-    const cx = window.innerWidth / 2;
-    const cy = window.innerHeight / 2;
-    const el = document.elementFromPoint(cx, cy);
-    if (!el)
-      return false;
-    const tag = el.tagName.toLowerCase();
-    const role = el.getAttribute("role") || "";
-    const cls = el.className || "";
-    const id = el.getAttribute("id") || "";
-    if (/backdrop|overlay|cdk-overlay|modal-backdrop/i.test(String(cls)))
-      return true;
-    if (/backdrop|overlay/i.test(id))
-      return true;
-    if (role === "dialog" || role === "alertdialog")
-      return true;
-    if (tag === "mat-dialog-container")
-      return true;
-    const style = window.getComputedStyle(el);
-    if (style.position === "fixed" && parseFloat(style.opacity) > 0) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width >= window.innerWidth * 0.9 && rect.height >= window.innerHeight * 0.9) {
-        const bg = style.backgroundColor;
-        if (bg && bg.startsWith("rgba") && !bg.endsWith(", 0)"))
-          return true;
-      }
-    }
-    let ancestor = el.parentElement;
-    while (ancestor && ancestor !== document.documentElement) {
-      const aCls = typeof ancestor.className === "string" ? ancestor.className : "";
-      const aId = ancestor.getAttribute("id") || "";
-      const aRole = ancestor.getAttribute("role") || "";
-      if (/modal|dialog|overlay|backdrop/i.test(aCls))
-        return true;
-      if (/modal|dialog|overlay|backdrop/i.test(aId))
-        return true;
-      if (aRole === "dialog" || aRole === "alertdialog")
-        return true;
-      ancestor = ancestor.parentElement;
-    }
-    const candidates = document.querySelectorAll('[class*="overlay"],[class*="backdrop"],[class*="modal"],[role="dialog"],[role="alertdialog"]');
-    for (const c of candidates) {
-      const s = window.getComputedStyle(c);
-      if (s.display === "none" || s.visibility === "hidden")
-        continue;
-      if (parseFloat(s.opacity) === 0)
-        continue;
-      const r = c.getBoundingClientRect();
-      if (r.width >= window.innerWidth * 0.8 && r.height >= window.innerHeight * 0.8)
-        return true;
-    }
-    return false;
-  });
-}
-async function probeClickPoint(page, selector) {
-  try {
-    return await page.evaluate((sel) => {
-      const el = document.querySelector(sel);
-      if (!el)
-        return { status: "clickable" };
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0)
-        return { status: "clickable" };
-      const cx = r.left + r.width / 2;
-      const cy = r.top + r.height / 2;
-      if (cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight) {
-        return { status: "offscreen" };
-      }
-      const top = document.elementFromPoint(cx, cy);
-      if (!top)
-        return { status: "offscreen" };
-      if (top === el || el.contains(top) || top.contains(el))
-        return { status: "clickable" };
-      if (top.tagName === "IFRAME")
-        return { status: "clickable" };
-      let node = el;
-      while (node) {
-        const root = node.getRootNode();
-        if (root instanceof ShadowRoot) {
-          const host = root.host;
-          if (host === top || top.contains(host))
-            return { status: "clickable" };
-          node = host;
-        } else
-          break;
-      }
-      const text2 = (top.innerText || top.getAttribute("aria-label") || "").trim().replace(/\s+/g, " ").slice(0, 80);
-      return {
-        status: "occluded",
-        occluder: { tag: top.tagName.toLowerCase(), role: top.getAttribute("role") || "", text: text2 }
-      };
-    }, selector);
-  } catch {
-    return { status: "clickable" };
-  }
-}
-function filterVisitedLinks(elements, currentUrl, visitedPages) {
-  let currentPath;
-  try {
-    const u = new URL(currentUrl);
-    currentPath = u.pathname + u.hash;
-  } catch {
-    currentPath = currentUrl;
-  }
-  return elements.filter((el) => {
-    if (el.role !== "link" || !el.href)
-      return true;
-    try {
-      const u = new URL(el.href);
-      const path = u.pathname + u.hash;
-      if (path === currentPath)
-        return false;
-      if (visitedPages.has(el.href) || visitedPages.has(normalizeUrl(el.href)))
-        return false;
-      return true;
-    } catch {
-      return true;
-    }
-  });
-}
-
-// src/upload-samples.ts
-var nodeBuffer = globalThis.Buffer;
-var b64 = (s) => nodeBuffer.from(s, "base64");
-var txt = (s) => nodeBuffer.from(s, "utf8");
-var SAMPLES = [
-  {
-    name: "sample.png",
-    ext: "png",
-    mimeType: "image/png",
-    buffer: b64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGJgAQAAAAUAAaX2RUAAAAAASUVORK5CYII=")
-  },
-  {
-    name: "sample.jpg",
-    ext: "jpg",
-    mimeType: "image/jpeg",
-    buffer: b64("/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAA//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AfwD/2Q==")
-  },
-  {
-    name: "sample.pdf",
-    ext: "pdf",
-    mimeType: "application/pdf",
-    buffer: b64("JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4+ZW5kb2JqCjIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PmVuZG9iagozIDAgb2JqPDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgMjAwIDIwMF0+PmVuZG9iagp0cmFpbGVyPDwvUm9vdCAxIDAgUj4+CiUlRU9GCg==")
-  },
-  { name: "sample.csv", ext: "csv", mimeType: "text/csv", buffer: txt(`name,email
-Test User,test@example.com
-`) },
-  { name: "sample.txt", ext: "txt", mimeType: "text/plain", buffer: txt(`sample text file
-`) },
-  { name: "sample.json", ext: "json", mimeType: "application/json", buffer: txt(`{"sample":true,"value":123}
-`) }
-];
-var DEFAULT_SAMPLE = SAMPLES[0];
-function tokenMatches(sample, token) {
-  const t = token.trim().toLowerCase();
-  if (!t)
-    return false;
-  if (t.startsWith("."))
-    return t.slice(1) === sample.ext;
-  if (t.endsWith("/*"))
-    return sample.mimeType.startsWith(t.slice(0, -1));
-  return t === sample.mimeType;
-}
-function pickSample(accept) {
-  if (!accept || !accept.trim())
-    return DEFAULT_SAMPLE;
-  const tokens = accept.split(",");
-  for (const sample of SAMPLES) {
-    if (tokens.some((tok) => tokenMatches(sample, tok)))
-      return sample;
-  }
-  return DEFAULT_SAMPLE;
-}
-
-// src/executor.ts
-var log5 = Log.create({ service: "hackbrowser:executor" });
-var CLICK_TIMEOUT = 2000;
-var FILL_TIMEOUT = 3000;
-var STABILIZE_TIMEOUT = 3000;
-var STABILIZE_WAIT = 200;
-async function execute(page, element, action, value, setPendingUI, elementsBefore) {
-  const urlBefore = page.url();
-  log5.info("executing", { action, elementId: element.id, label: element.label, selector: element.selector });
-  let error40;
-  switch (action) {
-    case "fill":
-      error40 = await executeFill(page, element, value ?? "");
-      break;
-    case "click":
-      setPendingUI(snapshotPageUI(page, page.locator(element.selector).first()));
-      error40 = await executeClick(page, element);
-      break;
-    case "select":
-      error40 = await executeSelect(page, element, value ?? "");
-      break;
-    case "navigate":
-      error40 = await executeNavigate(page, element);
-      break;
-    default:
-      error40 = `Unknown action: ${action}`;
-  }
-  if (!error40) {
-    await stabilize(page);
-  }
-  const urlAfter = page.url();
-  const navigated = urlAfter !== urlBefore;
-  return {
-    success: !error40,
-    error: error40,
-    navigated,
-    newUrl: navigated ? urlAfter : undefined,
-    domChanged: undefined
-  };
-}
-async function executeFill(page, element, value) {
-  const selector = element.selector;
-  if (element.role === "slider" || element.type === "range") {
-    return executeSliderFill(page, selector || "role=slider", value);
-  }
-  if (element.type === "file") {
-    return executeFileSelect(page, selector);
-  }
-  const fillErr = await page.fill(selector, value, { timeout: FILL_TIMEOUT }).then(() => null).catch((e) => e.message.split(`
-`)[0]);
-  if (!fillErr)
+  if (!enabled)
     return;
-  const typeErr = await page.locator(selector).pressSequentially(value, { delay: 30, timeout: FILL_TIMEOUT }).then(() => null).catch((e) => e.message.split(`
-`)[0]);
-  if (!typeErr)
-    return;
-  log5.warn("fill failed", { selector, error: fillErr });
-  return fillErr;
-}
-async function executeFileSelect(page, selector) {
-  const accept = await page.getAttribute(selector, "accept").catch(() => null);
-  const sample = pickSample(accept);
-  const err = await page.setInputFiles(selector, { name: sample.name, mimeType: sample.mimeType, buffer: sample.buffer }, { timeout: FILL_TIMEOUT }).then(() => null).catch((e) => e.message.split(`
-`)[0]);
-  if (err) {
-    log5.warn("file select failed", { selector, accept, error: err });
-    return err;
-  }
-  log5.info("file selected", { selector, file: sample.name });
-  return;
-}
-async function executeSliderFill(page, selector, value) {
-  const numericValue = parseInt(value);
-  if (isNaN(numericValue) || numericValue <= 0) {
-    return `Invalid slider value: ${value}`;
-  }
-  const root = page.locator(selector).first();
-  const evalSuccess = await root.evaluate((el, val) => {
-    const input = el.matches("input[type=range]") ? el : el.querySelector("input[type=range]");
-    if (!input)
-      return false;
-    input.value = String(val);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-    return true;
-  }, numericValue).catch(() => false);
-  if (evalSuccess)
-    return;
-  const clickErr = await root.click({ timeout: CLICK_TIMEOUT }).then(() => null).catch((e) => e);
-  if (!clickErr) {
-    await page.keyboard.press("Home");
-    for (let i = 0;i < numericValue; i++) {
-      await page.keyboard.press("ArrowRight");
-    }
-    return;
-  }
-  return `Slider interaction failed: ${selector}`;
-}
-async function executeClick(page, element) {
-  const err = await page.click(element.selector, { timeout: CLICK_TIMEOUT }).then(() => null).catch((e) => e.message.split(`
-`)[0]);
-  if (err) {
-    log5.warn("click failed", { selector: element.selector, error: err });
-    return err;
-  }
-  return;
-}
-async function executeSelect(page, element, value) {
-  const nativeErr = await page.selectOption(element.selector, value, { timeout: FILL_TIMEOUT }).then(() => null).catch((e) => e.message.split(`
-`)[0]);
-  if (!nativeErr)
-    return;
-  const clickErr = await page.click(element.selector, { timeout: CLICK_TIMEOUT }).then(() => null).catch((e) => e.message.split(`
-`)[0]);
-  if (clickErr) {
-    log5.warn("select failed", { selector: element.selector, error: nativeErr });
-    return nativeErr;
-  }
-  await page.waitForTimeout(300);
-  const optionErr = await page.click(`role=option[name="${value}"]`, { timeout: CLICK_TIMEOUT }).then(() => null).catch(() => page.click(`text="${value}"`, { timeout: CLICK_TIMEOUT }).then(() => null).catch((e) => e.message.split(`
-`)[0]));
-  if (optionErr) {
-    log5.warn("select option failed", { value, error: optionErr });
-    return optionErr;
-  }
-  return;
-}
-async function executeNavigate(page, element) {
-  if (!element.href)
-    return "Navigate element has no href";
-  const err = await page.goto(element.href, { waitUntil: "domcontentloaded", timeout: 15000 }).then(() => null).catch((e) => e.message.split(`
-`)[0]);
-  if (err) {
-    log5.warn("navigate failed", { url: element.href, error: err });
-    return err;
-  }
-  await page.waitForTimeout(400);
-  await page.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => {});
-  return;
-}
-async function stabilize(page) {
-  await page.waitForLoadState("domcontentloaded", { timeout: STABILIZE_TIMEOUT }).catch(() => {});
-  await page.waitForTimeout(STABILIZE_WAIT);
+  await page.evaluate((e) => {
+    const w = window;
+    w.__csEvent?.(e);
+  }, event).catch(() => {});
 }
 
 // src/panel/inject.ts
@@ -38064,32 +37250,853 @@ var PANEL_INIT_SCRIPT = `
 })();
 `;
 
-// src/panel/emit.ts
-var enabled = true;
-function setPanelEnabled(value) {
-  enabled = value;
+// src/state.ts
+function createGlobalState(opts) {
+  return {
+    visitedPages: new Set,
+    capturedEndpoints: new Set,
+    authPhase: "anonymous",
+    totalSteps: 0,
+    pageQueue: [],
+    deferredAuthPages: [],
+    pendingReDiscovery: false,
+    pathPatternCounts: new Map,
+    outOfScope: opts?.outOfScope ?? [],
+    intelligenceByCredential: new Map
+  };
 }
-var eventSink = null;
-function setEventSink(sink2) {
-  eventSink = sink2;
+var SINGLE_CRED = "__single__";
+function getIntelligence(state, credId) {
+  let intel = state.intelligenceByCredential.get(credId);
+  if (!intel) {
+    intel = {
+      emptyStateQueue: new Map,
+      revisitCount: new Map,
+      pageFingerprints: new Map
+    };
+    state.intelligenceByCredential.set(credId, intel);
+  }
+  return intel;
 }
-function clearEventSink() {
-  eventSink = null;
+var MAX_REVISITS_PER_URL = 2;
+var ANY_MUTATION = "*";
+function markPageEmpty(state, credId, url2, expectedMutation) {
+  const intel = getIntelligence(state, credId);
+  const count = intel.revisitCount.get(url2) ?? 0;
+  if (count >= MAX_REVISITS_PER_URL)
+    return false;
+  intel.emptyStateQueue.set(url2, expectedMutation ?? ANY_MUTATION);
+  return true;
 }
-async function csEmit(page, event) {
-  if (eventSink) {
-    try {
-      eventSink(event);
-    } catch (err) {
-      console.error("[hackbrowser:emit] eventSink threw, swallowing:", err);
+function drainOnMutation(state, credId, taskMutation) {
+  const intel = getIntelligence(state, credId);
+  if (intel.emptyStateQueue.size === 0)
+    return [];
+  const drained = [];
+  for (const [url2, expected] of intel.emptyStateQueue) {
+    const matches = expected === ANY_MUTATION || taskMutation !== undefined && expected === taskMutation;
+    if (!matches)
+      continue;
+    state.pageQueue.unshift(url2);
+    intel.revisitCount.set(url2, (intel.revisitCount.get(url2) ?? 0) + 1);
+    intel.pageFingerprints.delete(url2);
+    drained.push(url2);
+  }
+  for (const url2 of drained)
+    intel.emptyStateQueue.delete(url2);
+  return drained;
+}
+function hasSuccessfulMutation(httpRequests) {
+  if (!httpRequests?.length)
+    return false;
+  for (const line of httpRequests) {
+    const match = line.match(/^(POST|PUT|PATCH|DELETE)\s+\S+\s+\[(\d+)\]/);
+    if (!match)
+      continue;
+    const status = parseInt(match[2], 10);
+    if (status >= 200 && status < 300)
+      return true;
+  }
+  return false;
+}
+var AUTH_PATTERNS = [
+  { type: "register", pattern: /\/(register|signup|sign-up|create-account|join)/i },
+  { type: "login", pattern: /\/(login|signin|sign-in|authenticate|auth\/login)/i },
+  { type: "logout", pattern: /\/(logout|signout|sign-out|auth\/logout)/i }
+];
+function classifyAuthUrl(url2) {
+  try {
+    const u = new URL(url2);
+    const path = u.pathname + u.hash;
+    for (const { type, pattern } of AUTH_PATTERNS) {
+      if (pattern.test(path))
+        return type;
+    }
+  } catch {}
+  return null;
+}
+var INPUT_ROLES = new Set(["textbox", "combobox", "checkbox", "radio", "slider"]);
+var ACTION_ROLES = new Set(["button", "menuitem", "tab"]);
+function generateFingerprint(elements) {
+  return elements.filter((e) => INPUT_ROLES.has(e.role) || ACTION_ROLES.has(e.role) && !e.inChrome).map((e) => `${e.role}:${e.label}:${e.type}:${e.enabled}`).sort().join("|");
+}
+function generateFullFingerprint(elements) {
+  return elements.filter((e) => e.label && e.role !== "link" && e.role !== "info").map((e) => [e.role, e.label, e.type, e.enabled, e.options || "", e.placeholder || ""].join(":")).sort().join("|");
+}
+function computeElementAvailability(elementsByContext) {
+  const availability = new Map;
+  for (const [ctxId, elements] of elementsByContext) {
+    for (const el of elements) {
+      const key = `${el.role}::${el.label}`;
+      if (!availability.has(key))
+        availability.set(key, []);
+      availability.get(key).push(ctxId);
     }
   }
-  if (!enabled)
-    return;
-  await page.evaluate((e) => {
-    const w = window;
-    w.__csEvent?.(e);
-  }, event).catch(() => {});
+  return availability;
+}
+function normalizeUrl(url2) {
+  try {
+    const u = new URL(url2);
+    u.searchParams.sort();
+    const path = u.pathname.replace(/\/+$/, "") || "/";
+    let hash = u.hash;
+    if (hash && hash !== "#" && !hash.startsWith("#/")) {
+      hash = `#/${hash.slice(1)}`;
+    }
+    hash = hash.replace(/\/+$/, "");
+    if (hash === "#")
+      hash = "";
+    return u.origin + path + u.search + hash;
+  } catch {
+    return url2;
+  }
+}
+function elementToPrompt(el) {
+  const result = {
+    id: el.id,
+    role: el.role,
+    label: el.label
+  };
+  if (el.type)
+    result.type = el.type;
+  if (el.value)
+    result.value = el.value;
+  if (el.placeholder)
+    result.placeholder = el.placeholder;
+  if (el.options)
+    result.options = el.options;
+  if (el.constraints)
+    result.constraints = el.constraints;
+  if (!el.enabled)
+    result.enabled = false;
+  if (el.href) {
+    try {
+      const u = new URL(el.href);
+      result.href = u.pathname + u.hash;
+    } catch {
+      result.href = el.href;
+    }
+  }
+  return result;
+}
+function buildPlannerSnapshot(url2, elements, globalState, credId, viewportCenterBlocked, occlusions) {
+  const promptElements = elements.map(elementToPrompt);
+  if (occlusions && occlusions.length > 0) {
+    for (const occ of occlusions) {
+      const match = promptElements.find((e) => e.label === occ.label && e.role === occ.role);
+      if (match)
+        match.occludedBy = occ.occluderText;
+    }
+  }
+  const snapshot = {
+    url: url2,
+    viewportCenterBlocked,
+    totalPagesVisited: globalState.visitedPages.size,
+    elements: promptElements
+  };
+  if (globalState.outOfScope.length > 0) {
+    snapshot.outOfScope = [...globalState.outOfScope];
+  }
+  const intel = getIntelligence(globalState, credId);
+  const pending = new Set;
+  for (const kw of intel.emptyStateQueue.values()) {
+    if (kw !== ANY_MUTATION)
+      pending.add(kw);
+  }
+  if (pending.size > 0) {
+    snapshot.pendingMutations = [...pending];
+  }
+  return snapshot;
+}
+
+// src/scanner.ts
+var log5 = Log.create({ service: "hackbrowser:scanner" });
+var MAX_ELEMENTS = 50;
+var MAX_PER_TEMPLATE = 5;
+var REVEAL_MAX_STEPS = 10;
+var REVEAL_STEP_WAIT = 250;
+var EXPAND_MAX = 20;
+async function collectInteractiveElements(page) {
+  return page.evaluate(() => {
+    const FRAMEWORK_CLICK_ATTRS = [
+      "wire:click",
+      "hx-get",
+      "hx-post",
+      "hx-put",
+      "hx-patch",
+      "hx-delete",
+      "ng-click",
+      "x-on:click",
+      "@click",
+      "data-toggle",
+      "data-bs-toggle",
+      "data-hx-get",
+      "data-hx-post",
+      "data-hx-put",
+      "data-hx-patch",
+      "data-hx-delete",
+      "data-ng-click"
+    ];
+    function isStructurallyVisible(el) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0)
+        return false;
+      const style = window.getComputedStyle(el);
+      if (style.display === "none")
+        return false;
+      if (style.visibility === "hidden")
+        return false;
+      const tag = el.tagName.toLowerCase();
+      const isFormControl = tag === "input" || tag === "select" || tag === "textarea";
+      if (parseFloat(style.opacity) === 0 && !isFormControl)
+        return false;
+      if (el.getAttribute("aria-hidden") === "true")
+        return false;
+      if (style.pointerEvents === "none" && !el.disabled)
+        return false;
+      return true;
+    }
+    function getLabel(el) {
+      const ariaLabel = el.getAttribute("aria-label")?.trim();
+      if (ariaLabel) {
+        const childText = el.innerText?.trim();
+        if (childText && childText.length > 5 && childText.length < 80 && childText !== ariaLabel) {
+          return `${ariaLabel} — ${childText}`;
+        }
+        return ariaLabel;
+      }
+      const ariaLabelledBy = el.getAttribute("aria-labelledby");
+      if (ariaLabelledBy) {
+        const labelEl = document.getElementById(ariaLabelledBy);
+        if (labelEl?.textContent?.trim())
+          return labelEl.textContent.trim();
+      }
+      const id = el.getAttribute("id");
+      if (id) {
+        const labelEl = document.querySelector(`label[for="${id}"]`);
+        if (labelEl?.textContent?.trim())
+          return labelEl.textContent.trim();
+      }
+      const text2 = el.innerText?.trim();
+      if (text2 && text2.length < 80)
+        return text2;
+      const parentLabel = el.closest?.("label");
+      if (parentLabel && !parentLabel.isSameNode(el)) {
+        const parentText = parentLabel.textContent?.trim();
+        if (parentText && parentText.length < 80)
+          return parentText;
+      }
+      const placeholder = el.placeholder;
+      if (placeholder)
+        return placeholder;
+      if (el.tagName.toLowerCase() === "input") {
+        const itype = el.type?.toLowerCase();
+        if (itype === "image") {
+          const alt = el.getAttribute("alt")?.trim();
+          if (alt)
+            return alt;
+        }
+        if (itype === "submit" || itype === "button" || itype === "image") {
+          const val = el.value?.trim();
+          if (val)
+            return val;
+        }
+      }
+      const root = el.getRootNode();
+      if (root instanceof ShadowRoot && root.host) {
+        const host = root.host;
+        const hostAria = host.getAttribute("aria-label")?.trim();
+        if (hostAria)
+          return hostAria;
+        const hostLabelAttr = host.getAttribute("label")?.trim();
+        if (hostLabelAttr)
+          return hostLabelAttr;
+        const hostText = host.innerText?.trim();
+        if (hostText && hostText.length < 80)
+          return hostText;
+      }
+      const name19 = el.getAttribute("name") || el.getAttribute("data-testid");
+      if (name19)
+        return name19;
+      return "";
+    }
+    function getRole(el) {
+      const explicit = el.getAttribute("role");
+      if (explicit)
+        return explicit.toLowerCase();
+      const tag = el.tagName.toLowerCase();
+      const type = el.type?.toLowerCase();
+      if (tag === "button")
+        return "button";
+      if (tag === "summary")
+        return "button";
+      if (tag === "a" && el.getAttribute("href"))
+        return "link";
+      if (tag === "input") {
+        if (type === "submit" || type === "button" || type === "image")
+          return "button";
+        if (type === "checkbox")
+          return "checkbox";
+        if (type === "radio")
+          return "radio";
+        if (type === "hidden")
+          return "";
+        if (type === "range")
+          return "slider";
+        return "textbox";
+      }
+      if (tag === "textarea")
+        return "textbox";
+      if (tag === "select")
+        return "combobox";
+      if (tag === "li" && el.closest("[role=menu],[role=listbox]"))
+        return "menuitem";
+      if (el.hasAttribute("onclick"))
+        return "button";
+      for (const a of FRAMEWORK_CLICK_ATTRS)
+        if (el.hasAttribute(a))
+          return "button";
+      return "";
+    }
+    function isEphemeralId(id) {
+      if (/^:/.test(id) || /:r[0-9a-z]+:/i.test(id))
+        return true;
+      return /^(mui-\d|radix-|headlessui-|react-aria-|rc-_?\d|ember\d)/i.test(id);
+    }
+    function buildCSSSelectorCandidate(el) {
+      const tag = el.tagName.toLowerCase();
+      const id = el.getAttribute("id");
+      if (id && !isEphemeralId(id))
+        return `${tag}#${CSS.escape(id)}`;
+      const name19 = el.getAttribute("name");
+      if (name19)
+        return `${tag}[name="${CSS.escape(name19)}"]`;
+      function ancestorPrefix(el2) {
+        let current = el2.parentElement;
+        while (current && current !== document.documentElement) {
+          const aTag = current.tagName.toLowerCase();
+          const aId = current.getAttribute("id");
+          if (aId && !isEphemeralId(aId))
+            return `${aTag}#${CSS.escape(aId)} `;
+          const aCls = typeof current.className === "string" ? current.className.trim().split(/\s+/).filter((c) => c.length > 2)[0] : undefined;
+          if (aCls)
+            return `${aTag}.${CSS.escape(aCls)} `;
+          current = current.parentElement;
+        }
+        return "";
+      }
+      const cls = el.className;
+      if (typeof cls === "string" && cls.trim()) {
+        const classes = cls.trim().split(/\s+/).filter((c) => c.length > 2);
+        if (classes.length > 0) {
+          const clsSel = `${tag}.${CSS.escape(classes[0])}`;
+          const parent2 = el.parentElement;
+          if (parent2) {
+            const siblings = Array.from(parent2.querySelectorAll(`:scope > ${clsSel}`));
+            const idx = siblings.indexOf(el);
+            if (idx >= 0)
+              return `${ancestorPrefix(el)}${clsSel}:nth-of-type(${idx + 1})`;
+          }
+          return clsSel;
+        }
+      }
+      const parent = el.parentElement;
+      if (parent) {
+        const siblings = Array.from(parent.querySelectorAll(`:scope > ${tag}`));
+        const idx = siblings.indexOf(el);
+        if (idx >= 0) {
+          const nthSel = `${tag}:nth-of-type(${idx + 1})`;
+          return `${ancestorPrefix(el)}${nthSel}`;
+        }
+      }
+      return tag;
+    }
+    function uniquePositionalPath(el) {
+      const segs = [];
+      let cur = el;
+      while (cur && cur !== document.documentElement) {
+        const tag = cur.tagName.toLowerCase();
+        const id = cur.getAttribute("id");
+        if (id && !isEphemeralId(id)) {
+          segs.unshift(`${tag}#${CSS.escape(id)}`);
+          break;
+        }
+        const parent = cur.parentElement;
+        if (!parent) {
+          segs.unshift(tag);
+          break;
+        }
+        const sameTag = Array.from(parent.children).filter((c) => c.tagName === cur.tagName);
+        segs.unshift(sameTag.length > 1 ? `${tag}:nth-of-type(${sameTag.indexOf(cur) + 1})` : tag);
+        cur = parent;
+      }
+      return segs.join(" > ");
+    }
+    function buildCSSSelector(el) {
+      const candidate = buildCSSSelectorCandidate(el);
+      try {
+        if (document.querySelectorAll(candidate).length === 1)
+          return candidate;
+      } catch {}
+      return uniquePositionalPath(el);
+    }
+    const INTERACTIVE_SELECTORS = [
+      "button",
+      "a[href]",
+      "input:not([type=hidden]):not([disabled])",
+      "textarea:not([disabled])",
+      "select:not([disabled])",
+      "[role=button]",
+      "[role=link]",
+      "[role=menuitem]",
+      "[role=tab]",
+      "[role=checkbox]",
+      "[role=radio]",
+      "[role=combobox]",
+      "[role=option]",
+      "[role=slider]",
+      "[onclick]",
+      "summary",
+      ...FRAMEWORK_CLICK_ATTRS.map((a) => `[${CSS.escape(a)}]`)
+    ].join(", ");
+    function queryAllDeep(selector) {
+      const out = [];
+      const walk = (root) => {
+        for (const el of root.querySelectorAll(selector))
+          out.push(el);
+        for (const host of root.querySelectorAll("*")) {
+          if (host.closest("[data-cyberstrike-ui]"))
+            continue;
+          const sr = host.shadowRoot;
+          if (sr)
+            walk(sr);
+        }
+      };
+      walk(document);
+      return out;
+    }
+    function serializeConstraints(el, type) {
+      const tag = el.tagName.toLowerCase();
+      if (tag !== "input" && tag !== "textarea")
+        return "";
+      const parts = [];
+      const getAttr = (name19) => el.getAttribute(name19)?.trim() ?? "";
+      const min = getAttr("min");
+      const max = getAttr("max");
+      const step = getAttr("step");
+      const maxlength = getAttr("maxlength");
+      const minlength = getAttr("minlength");
+      const pattern = getAttr("pattern");
+      const isNumericRange = type === "range" || type === "number";
+      const isDateTime = type === "date" || type === "time" || type === "datetime-local" || type === "month" || type === "week";
+      if (isNumericRange || isDateTime) {
+        if (min)
+          parts.push(`min:${min}`);
+        if (max)
+          parts.push(`max:${max}`);
+        if (isNumericRange && step && step !== "any")
+          parts.push(`step:${step}`);
+      }
+      if ((tag === "textarea" || ["text", "email", "url", "tel", "password", "search"].includes(type)) && maxlength) {
+        parts.push(`maxlength:${maxlength}`);
+      }
+      if (minlength)
+        parts.push(`minlength:${minlength}`);
+      if (pattern)
+        parts.push(`pattern:${pattern}`);
+      if (["email", "url", "tel"].includes(type))
+        parts.push(`type:${type}`);
+      return parts.join(" ");
+    }
+    const elements = [];
+    const seenCount = new Map;
+    const seenRoleSelectors = new Map;
+    function addElement(el, role, syntheticRole = false) {
+      const label = getLabel(el);
+      const tag = el.tagName.toLowerCase();
+      const type = el.type?.toLowerCase() || "";
+      const rawHref = (el.getAttribute("href") || "").trim();
+      const navigates = !!rawHref && rawHref !== "#" && !rawHref.startsWith("#") && !rawHref.startsWith("javascript:");
+      const href = navigates ? el.href || "" : "";
+      const nonNavAnchor = tag === "a" && !navigates;
+      if (nonNavAnchor)
+        role = "button";
+      const isSlider = role === "slider";
+      const value = isSlider ? el.getAttribute("aria-valuenow") ?? el.value ?? "" : el.value || "";
+      const placeholder = el.placeholder || "";
+      const enabled2 = !el.disabled;
+      const options = tag === "select" ? Array.from(el.querySelectorAll("option")).map((o) => o.textContent?.trim() || "").filter(Boolean).slice(0, 10).join(", ") : "";
+      const constraints = serializeConstraints(el, type);
+      const innerText = el.innerText?.trim().slice(0, 40) || "";
+      const dedupKey = `${role}::${label}::${href}::${innerText}`;
+      const count = (seenCount.get(dedupKey) ?? 0) + 1;
+      seenCount.set(dedupKey, count);
+      if (count > 3)
+        return;
+      const disambiguatedLabel = count > 1 ? `${label} (${count})` : label;
+      const ariaLabelRaw = (el.getAttribute("aria-label") || "").trim();
+      const safeAriaLabel = ariaLabelRaw.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+      const isFileInput = el.matches("input[type=file]");
+      const selectorRole = syntheticRole || count > 1 || isFileInput || nonNavAnchor ? "" : safeAriaLabel ? `role=${role}[name="${safeAriaLabel}"]` : `role=${role}`;
+      const selectorCSS = buildCSSSelector(el);
+      const inChrome = !!el.closest("nav, header, footer, aside, [role=navigation], [role=banner], [role=contentinfo], [role=complementary]");
+      const roleCount = (seenRoleSelectors.get(selectorRole) ?? 0) + 1;
+      seenRoleSelectors.set(selectorRole, roleCount);
+      elements.push({
+        tag,
+        role,
+        label: disambiguatedLabel,
+        value,
+        enabled: enabled2,
+        href,
+        type,
+        placeholder,
+        options,
+        constraints,
+        selectorRole,
+        selectorCSS,
+        inChrome
+      });
+    }
+    for (const el of queryAllDeep(INTERACTIVE_SELECTORS)) {
+      if (el.closest("[data-cyberstrike-ui]"))
+        continue;
+      const role = getRole(el);
+      if (!role)
+        continue;
+      const isSlider = role === "slider";
+      if (!isSlider && !isStructurallyVisible(el))
+        continue;
+      addElement(el, role);
+    }
+    for (const el of queryAllDeep("div, span, li")) {
+      if (el.closest("[data-cyberstrike-ui]"))
+        continue;
+      if (el.getAttribute("role"))
+        continue;
+      if (el.hasAttribute("onclick"))
+        continue;
+      if (!isStructurallyVisible(el))
+        continue;
+      const text2 = el.innerText?.trim() || "";
+      if (!text2 || text2.length > 80)
+        continue;
+      if (el.querySelector(INTERACTIVE_SELECTORS))
+        continue;
+      if (window.getComputedStyle(el).cursor !== "pointer")
+        continue;
+      const parent = el.parentElement;
+      if (parent && window.getComputedStyle(parent).cursor === "pointer")
+        continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width >= window.innerWidth * 0.9 && rect.height >= window.innerHeight * 0.5)
+        continue;
+      addElement(el, "button", true);
+    }
+    const INTERACTIVE_TAGS = new Set(["input", "button", "a", "select", "textarea"]);
+    const INTERACTIVE_ROLES = new Set([
+      "button",
+      "link",
+      "menuitem",
+      "tab",
+      "checkbox",
+      "radio",
+      "combobox",
+      "option",
+      "slider",
+      "textbox"
+    ]);
+    const infoSeen = new Set;
+    const interactiveLabels = new Set(elements.map((e) => e.label.toLowerCase()));
+    for (const el of document.querySelectorAll("[aria-label]")) {
+      if (el.closest("[data-cyberstrike-ui]"))
+        continue;
+      const tag = el.tagName.toLowerCase();
+      const role = (el.getAttribute("role") || "").toLowerCase();
+      if (INTERACTIVE_TAGS.has(tag) || INTERACTIVE_ROLES.has(role))
+        continue;
+      if (!isStructurallyVisible(el))
+        continue;
+      const ariaLabel = el.getAttribute("aria-label")?.trim();
+      if (!ariaLabel)
+        continue;
+      if (interactiveLabels.has(ariaLabel.toLowerCase()))
+        continue;
+      const text2 = el.innerText?.trim() || el.textContent?.trim() || "";
+      if (!text2 || text2.length > 150)
+        continue;
+      const key = `info::${ariaLabel}`;
+      if (infoSeen.has(key))
+        continue;
+      infoSeen.add(key);
+      elements.push({
+        tag,
+        role: "info",
+        label: ariaLabel,
+        value: text2,
+        enabled: false,
+        href: "",
+        type: "",
+        placeholder: "",
+        options: "",
+        constraints: "",
+        selectorRole: "",
+        selectorCSS: "",
+        inChrome: false
+      });
+    }
+    for (const el of elements) {
+      if (el.selectorRole && seenRoleSelectors.get(el.selectorRole) > 1 && el.selectorCSS) {
+        el.selectorRole = "";
+      }
+    }
+    return elements;
+  });
+}
+function assignIds(browserElements, startId) {
+  return browserElements.map((el, i) => ({
+    id: `E${startId + i}`,
+    tag: el.tag,
+    role: el.role,
+    label: el.label,
+    value: el.value,
+    enabled: el.enabled,
+    href: el.href,
+    type: el.type,
+    placeholder: el.placeholder,
+    options: el.options,
+    constraints: el.constraints,
+    selector: el.selectorRole.includes("[name=") ? el.selectorRole : el.selectorCSS || el.selectorRole,
+    inChrome: el.inChrome
+  }));
+}
+async function collectElements(page) {
+  const browserElements = await collectInteractiveElements(page);
+  const sampled = capElements(sampleTemplates(browserElements));
+  return assignIds(sampled, 1);
+}
+var ACTION_ROLES_CAP = new Set(["button", "link", "menuitem", "tab"]);
+function capElements(els) {
+  if (els.length <= MAX_ELEMENTS)
+    return els;
+  const actions = els.filter((e) => ACTION_ROLES_CAP.has(e.role));
+  const rest = els.filter((e) => !ACTION_ROLES_CAP.has(e.role));
+  const kept = new Set([...actions, ...rest].slice(0, MAX_ELEMENTS));
+  return els.filter((e) => kept.has(e));
+}
+function sampleTemplates(elements) {
+  const clusterCount = new Map;
+  const out = [];
+  for (const el of elements) {
+    const masked = el.label.replace(/\d+/g, "#");
+    if (masked === el.label) {
+      out.push(el);
+      continue;
+    }
+    const key = `${el.role}::${masked}`;
+    const n = (clusterCount.get(key) ?? 0) + 1;
+    clusterCount.set(key, n);
+    if (n <= MAX_PER_TEMPLATE)
+      out.push(el);
+  }
+  return out;
+}
+async function revealLazyContent(page) {
+  try {
+    for (let i = 0;i < REVEAL_MAX_STEPS; i++) {
+      const advanced = await page.evaluate(() => {
+        const before = window.scrollY;
+        window.scrollBy(0, Math.round(window.innerHeight * 0.9));
+        return window.scrollY > before;
+      });
+      await page.waitForTimeout(REVEAL_STEP_WAIT);
+      if (!advanced)
+        break;
+    }
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(REVEAL_STEP_WAIT);
+  } catch {}
+}
+async function expandDisclosures(page) {
+  try {
+    await page.evaluate((max) => {
+      let budget = max;
+      for (const d of Array.from(document.querySelectorAll("details:not([open])"))) {
+        if (budget <= 0)
+          break;
+        if (d.closest("[data-cyberstrike-ui]"))
+          continue;
+        d.open = true;
+        budget--;
+      }
+      for (const c of Array.from(document.querySelectorAll('[aria-expanded="false"]'))) {
+        if (budget <= 0)
+          break;
+        if (c.closest("[data-cyberstrike-ui]"))
+          continue;
+        if (c.getAttribute("role") === "tab")
+          continue;
+        if (c.hasAttribute("aria-haspopup") && c.getAttribute("aria-haspopup") !== "false")
+          continue;
+        c.click();
+        budget--;
+      }
+    }, EXPAND_MAX);
+    await page.waitForTimeout(REVEAL_STEP_WAIT);
+  } catch {}
+}
+async function isViewportCenterBlocked(page) {
+  try {
+    return await evalIsViewportCenterBlocked(page);
+  } catch (err) {
+    const msg = String(err?.message ?? err);
+    if (msg.includes("Execution context was destroyed") || msg.includes("Target closed")) {
+      return false;
+    }
+    throw err;
+  }
+}
+function evalIsViewportCenterBlocked(page) {
+  return page.evaluate(() => {
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const el = document.elementFromPoint(cx, cy);
+    if (!el)
+      return false;
+    const tag = el.tagName.toLowerCase();
+    const role = el.getAttribute("role") || "";
+    const cls = el.className || "";
+    const id = el.getAttribute("id") || "";
+    if (/backdrop|overlay|cdk-overlay|modal-backdrop/i.test(String(cls)))
+      return true;
+    if (/backdrop|overlay/i.test(id))
+      return true;
+    if (role === "dialog" || role === "alertdialog")
+      return true;
+    if (tag === "mat-dialog-container")
+      return true;
+    const style = window.getComputedStyle(el);
+    if (style.position === "fixed" && parseFloat(style.opacity) > 0) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width >= window.innerWidth * 0.9 && rect.height >= window.innerHeight * 0.9) {
+        const bg = style.backgroundColor;
+        if (bg?.startsWith("rgba") && !bg.endsWith(", 0)"))
+          return true;
+      }
+    }
+    let ancestor = el.parentElement;
+    while (ancestor && ancestor !== document.documentElement) {
+      const aCls = typeof ancestor.className === "string" ? ancestor.className : "";
+      const aId = ancestor.getAttribute("id") || "";
+      const aRole = ancestor.getAttribute("role") || "";
+      if (/modal|dialog|overlay|backdrop/i.test(aCls))
+        return true;
+      if (/modal|dialog|overlay|backdrop/i.test(aId))
+        return true;
+      if (aRole === "dialog" || aRole === "alertdialog")
+        return true;
+      ancestor = ancestor.parentElement;
+    }
+    const candidates = document.querySelectorAll('[class*="overlay"],[class*="backdrop"],[class*="modal"],[role="dialog"],[role="alertdialog"]');
+    for (const c of candidates) {
+      const s = window.getComputedStyle(c);
+      if (s.display === "none" || s.visibility === "hidden")
+        continue;
+      if (parseFloat(s.opacity) === 0)
+        continue;
+      const r = c.getBoundingClientRect();
+      if (r.width >= window.innerWidth * 0.8 && r.height >= window.innerHeight * 0.8)
+        return true;
+    }
+    return false;
+  });
+}
+async function probeClickPoint(page, selector) {
+  try {
+    return await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      if (!el)
+        return { status: "clickable" };
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0)
+        return { status: "clickable" };
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      if (cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight) {
+        return { status: "offscreen" };
+      }
+      const top = document.elementFromPoint(cx, cy);
+      if (!top)
+        return { status: "offscreen" };
+      if (top === el || el.contains(top) || top.contains(el))
+        return { status: "clickable" };
+      if (top.tagName === "IFRAME")
+        return { status: "clickable" };
+      let node = el;
+      while (node) {
+        const root = node.getRootNode();
+        if (root instanceof ShadowRoot) {
+          const host = root.host;
+          if (host === top || top.contains(host))
+            return { status: "clickable" };
+          node = host;
+        } else
+          break;
+      }
+      const text2 = (top.innerText || top.getAttribute("aria-label") || "").trim().replace(/\s+/g, " ").slice(0, 80);
+      return {
+        status: "occluded",
+        occluder: { tag: top.tagName.toLowerCase(), role: top.getAttribute("role") || "", text: text2 }
+      };
+    }, selector);
+  } catch {
+    return { status: "clickable" };
+  }
+}
+function filterVisitedLinks(elements, currentUrl, visitedPages) {
+  let currentPath;
+  try {
+    const u = new URL(currentUrl);
+    currentPath = u.pathname + u.hash;
+  } catch {
+    currentPath = currentUrl;
+  }
+  return elements.filter((el) => {
+    if (el.role !== "link" || !el.href)
+      return true;
+    try {
+      const u = new URL(el.href);
+      const path = u.pathname + u.hash;
+      if (path === currentPath)
+        return false;
+      if (visitedPages.has(el.href) || visitedPages.has(normalizeUrl(el.href)))
+        return false;
+      return true;
+    } catch {
+      return true;
+    }
+  });
 }
 
 // ../../node_modules/psl/dist/psl.mjs
@@ -48116,7 +48123,7 @@ function makeMatcher(scopes) {
   return (host) => {
     const h = host.toLowerCase().replace(/\.+$/, "");
     for (const base of bases) {
-      if (h === base || h.endsWith("." + base))
+      if (h === base || h.endsWith(`.${base}`))
         return true;
     }
     return false;
@@ -48345,7 +48352,7 @@ function setupRequestInterceptor(page, inScope, onCapture, credentialId = SINGLE
         try {
           body = await pwResponse.text();
           if (body.length > 500 * 1024)
-            body = body.slice(0, 500 * 1024) + `
+            body = `${body.slice(0, 500 * 1024)}
 [TRUNCATED]`;
         } catch {}
         response = { status: status2, headers: respHeaders, body };
@@ -48447,7 +48454,7 @@ function getPathPatternKey(url2) {
     const paramKeys = [...u.searchParams.keys()].sort();
     if (paramKeys.length === 0)
       return null;
-    return u.pathname + "[" + paramKeys.join(",") + "]";
+    return `${u.pathname}[${paramKeys.join(",")}]`;
   } catch {
     return null;
   }
@@ -48473,7 +48480,12 @@ async function explorePageWithAI(page, pageUrl, interceptor, model, globalState,
   log6.debug("initial scan", { elements: elements.length });
   const vcBlocked = await isViewportCenterBlocked(page);
   const snapshot = buildPlannerSnapshot(pageUrl, elements, globalState, credentialId, vcBlocked);
-  csEmit(page, { type: "llm-thinking", reason: "page-plan", elements: elements.length, credential: credentialId });
+  csEmit(page, {
+    type: "llm-thinking",
+    reason: "page-plan",
+    elements: elements.length,
+    credential: credentialId
+  });
   const plan = await planPage(snapshot, model, usageAcc);
   log6.info("page plan received", {
     tasks: plan.tasks.length,
@@ -48502,7 +48514,10 @@ async function explorePageWithAI(page, pageUrl, interceptor, model, globalState,
       const lookupRole = task.type === "form" ? task.fields[0]?.role ?? task.submit.role : task.role;
       const lookupLabel = task.type === "form" ? task.fields[0]?.label ?? task.submit.label : task.label;
       if (!resolveElement(elements, lookupRole, lookupLabel) && await isViewportCenterBlocked(page)) {
-        log6.debug("task target blocked by overlay, closing overlay first", { role: lookupRole, label: lookupLabel });
+        log6.debug("task target blocked by overlay, closing overlay first", {
+          role: lookupRole,
+          label: lookupLabel
+        });
         await closeOverlay(page);
         elements = filterVisitedLinks(await collectElements(page), pageUrl, globalState.visitedPages);
       }
@@ -48875,7 +48890,7 @@ function discoverNewElements(elements, seenKeys) {
     log6.debug("new elements discovered after action");
   return found;
 }
-function findUnexploredElements(elements, semanticActionsDone, seenKeys) {
+function findUnexploredElements(elements, semanticActionsDone, _seenKeys) {
   const unexplored = [];
   const rolesSeen = new Set;
   for (const el of elements) {
@@ -49049,7 +49064,7 @@ async function dismissCookieBanner(page) {
     }
   }
 }
-async function collectDOMLinks(page, pageUrl, inScope) {
+async function collectDOMLinks(page, _pageUrl, inScope) {
   const hrefs = await page.$$eval("a[href]", (els) => els.map((el) => el.href).filter(Boolean));
   const results = [];
   const seen = new Set;
@@ -49515,7 +49530,10 @@ async function run(config2) {
     }
     const currentUrl = normalizeUrl(page.url());
     if (currentUrl !== normalizeUrl(nextUrl) && globalState.visitedPages.has(currentUrl)) {
-      log6.info("redirect to already-explored page, skipping", { requested: normalizeUrl(nextUrl), landed: currentUrl });
+      log6.info("redirect to already-explored page, skipping", {
+        requested: normalizeUrl(nextUrl),
+        landed: currentUrl
+      });
       continue;
     }
     globalState.visitedPages.add(currentUrl);
@@ -49776,7 +49794,9 @@ Options:
   --url <url>          Target URL (required; scheme + host)
   --scope <domain>     In-scope host; repeatable (default: target's host)
   --steps <N>          Max navigation steps (default: 10)
-  --headless           Run headless (always used; flag kept for compat)
+  --headless           Run headless (default)
+  --headed             Run with a visible browser window (needs a display;
+                       xvfb-run in containers)
   --out <file>         JSONL output file (default: ./requests.jsonl)
   --user <u>           Login username (auto-login on discovered form)
   --pass <p>           Login password
@@ -49805,6 +49825,7 @@ function parseArgs(argv) {
       case "--help":
         console.log(USAGE);
         process.exit(0);
+        break;
       case "--url":
         args.url = next(i, "--url");
         i++;
@@ -49818,6 +49839,10 @@ function parseArgs(argv) {
         i++;
         break;
       case "--headless":
+        args.headed = false;
+        break;
+      case "--headed":
+        args.headed = true;
         break;
       case "--out":
         args.out = next(i, "--out");
@@ -49949,8 +49974,8 @@ function toNetscapeJar(cookies) {
     const expiry = c.expires && c.expires > 0 ? Math.floor(c.expires) : 0;
     return [domain2, "TRUE", c.path || "/", c.secure ? "TRUE" : "FALSE", String(expiry), c.name, c.value].join("\t");
   });
-  return lines.length > 0 ? lines.join(`
-`) + `
+  return lines.length > 0 ? `${lines.join(`
+`)}
 ` : "";
 }
 async function exportSession(context, dir, records) {
@@ -49977,7 +50002,7 @@ async function main() {
     url: args.url,
     scope: args.scope,
     steps: args.steps,
-    headless: true,
+    headless: !args.headed,
     panel: false,
     cyberstrikeUrl: `http://${SINK_HOST}:${SINK_PORT}`,
     model,
@@ -49992,7 +50017,12 @@ async function main() {
     }
   };
   if (args.user && args.pass) {
-    opts.credentials = { username: args.user, password: args.pass, usernameSelector: args.selU, passwordSelector: args.selP };
+    opts.credentials = {
+      username: args.user,
+      password: args.pass,
+      usernameSelector: args.selU,
+      passwordSelector: args.selP
+    };
   }
   if (args.sessionOut) {
     opts.onCrawlEnd = (context) => exportSession(context, args.sessionOut, sink2.records);

@@ -94,7 +94,7 @@ function updateJarForSetCookie(jar, setCookies, host) {
 ` : "");
     } else {
       const domain = `.${host}`;
-      out += [domain, "TRUE", "/", "FALSE", "0", name, value].join("\t") + `
+      out += `${[domain, "TRUE", "/", "FALSE", "0", name, value].join("\t")}
 `;
     }
   }
@@ -106,7 +106,7 @@ function atomicWrite(file, content) {
   fs.renameSync(tmp, file);
 }
 function log(dir, record) {
-  fs.appendFileSync(path.join(dir, "bot.log"), JSON.stringify({ ts: new Date().toISOString(), ...record }) + `
+  fs.appendFileSync(path.join(dir, "bot.log"), `${JSON.stringify({ ts: new Date().toISOString(), ...record })}
 `);
 }
 function loadJson(dir, name) {

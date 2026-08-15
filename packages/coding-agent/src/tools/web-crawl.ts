@@ -20,6 +20,7 @@ const webCrawlSchema = type({
 	"selP?": "string",
 	"sessionOut?": "string",
 	"sessionIn?": "string",
+	"headed?": "boolean",
 	"timeout?": "number.integer >= 1",
 });
 
@@ -193,10 +194,22 @@ export class WebCrawlTool implements AgentTool<typeof webCrawlSchema, WebCrawlTo
 		if (params.selP) args.push("--sel-p", params.selP);
 		if (params.sessionOut) args.push("--session-out", params.sessionOut);
 		if (params.sessionIn) args.push("--session-in", params.sessionIn);
+		if (params.headed) args.push("--headed");
+		// Headed mode on Linux without a display (containers/CI): wrap in
+		// xvfb-run so the visible-browser request still works.
+		let command = ["node", bundle, ...args];
+		if (params.headed && process.platform === "linux" && !process.env.DISPLAY) {
+			if (!fs.existsSync("/usr/bin/xvfb-run")) {
+				throw new ToolError(
+					"headed crawl on Linux without DISPLAY needs xvfb-run (apt install xvfb) — or run with DISPLAY set",
+				);
+			}
+			command = ["xvfb-run", "-a", ...command];
+		}
 
 		const maxTimeout = this.session.settings.get("tools.maxTimeout");
 		const timeoutSec = clampTimeout("web_crawl", params.timeout, maxTimeout);
-		const proc = Bun.spawn(["node", bundle, ...args], {
+		const proc = Bun.spawn(command, {
 			cwd:
 				process.env.PI_COMPILED === "true"
 					? dirname(bundle)

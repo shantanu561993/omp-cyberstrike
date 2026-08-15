@@ -36,7 +36,9 @@ Options:
   --url <url>          Target URL (required; scheme + host)
   --scope <domain>     In-scope host; repeatable (default: target's host)
   --steps <N>          Max navigation steps (default: 10)
-  --headless           Run headless (always used; flag kept for compat)
+  --headless           Run headless (default)
+  --headed             Run with a visible browser window (needs a display;
+                       xvfb-run in containers)
   --out <file>         JSONL output file (default: ./requests.jsonl)
   --user <u>           Login username (auto-login on discovered form)
   --pass <p>           Login password
@@ -62,6 +64,7 @@ interface Args {
 	selP?: string;
 	sessionOut?: string;
 	sessionIn?: string;
+	headed?: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -92,6 +95,10 @@ function parseArgs(argv: string[]): Args {
 				i++;
 				break;
 			case "--headless":
+				args.headed = false;
+				break;
+			case "--headed":
+				args.headed = true;
 				break;
 			case "--out":
 				args.out = next(i, "--out");
@@ -283,7 +290,7 @@ async function main(): Promise<void> {
 		url: args.url,
 		scope: args.scope,
 		steps: args.steps,
-		headless: true,
+		headless: !args.headed,
 		panel: false,
 		cyberstrikeUrl: `http://${SINK_HOST}:${SINK_PORT}`,
 		model,
