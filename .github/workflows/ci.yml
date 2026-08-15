@@ -475,8 +475,7 @@ jobs:
    release_binary:
       name: "Release binary: ${{ matrix.target_id }}"
       if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
-         needs.native_addons.result == 'success' &&
-         (github.repository == 'can1357/oh-my-pi' || matrix.target_id == 'linux-x64' || matrix.target_id == 'linux-arm64' || matrix.target_id == 'win32-x64') }}
+         needs.native_addons.result == 'success' }}
       needs: [release_metadata, native_addons]
       strategy:
          fail-fast: false
@@ -542,7 +541,7 @@ jobs:
          # its published npm leaf (@oh-my-pi/pi-natives-<target_id>), which the
          # build's embed step picks up from packages/natives/native.
          - name: Install native addons from npm (fork)
-           if: github.repository != 'can1357/oh-my-pi'
+           if: github.repository != 'can1357/oh-my-pi' && !startsWith(matrix.target_id, 'linux-musl')
            shell: bash
            run: |
               set -euo pipefail
@@ -556,6 +555,7 @@ jobs:
            with:
               targets: ${{ matrix.native_targets }}
          - name: Build release binary
+           if: github.repository == 'can1357/oh-my-pi' || !startsWith(matrix.target_id, 'linux-musl')
            env:
               RELEASE_TARGETS: ${{ matrix.target_id }}
            run: bun run ci:release:build-binaries
@@ -571,7 +571,7 @@ jobs:
               HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" "${{ matrix.binary_path }}" --version
               HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" "${{ matrix.binary_path }}" --smoke-test
          - name: Smoke musl release binary on Alpine
-           if: matrix.libc == 'musl'
+           if: matrix.libc == 'musl' && (github.repository == 'can1357/oh-my-pi' || !startsWith(matrix.target_id, 'linux-musl'))
            run: |
               binary="$(realpath "${{ matrix.binary_path }}")"
               # Bun's musl-target binaries link libstdc++/libgcc dynamically;
