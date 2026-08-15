@@ -40,11 +40,9 @@ function crawlBundlePath(): string {
 }
 
 /**
- * In compiled mode the staged runtime dir has no node_modules, so node cannot
- * resolve the bundle's `playwright` import from the bundle location. Walk up
- * from the binary path for a workspace node_modules that provides playwright
- * and symlink it into the staged runtime dir (standalone binaries outside a
- * checkout get a clear ToolError instead).
+ * Fallback for checkout-style installs: walk up from the binary path for a
+ * workspace node_modules that provides playwright and symlink it into the
+ * staged runtime dir.
  */
 function linkStagedBundleDeps(bundlePath: string): void {
 	const linkTarget = join(dirname(bundlePath), "node_modules");
@@ -64,6 +62,67 @@ function linkStagedBundleDeps(bundlePath: string): void {
 		if (parent === dir) return;
 		dir = parent;
 	}
+}
+
+/**
+ * In compiled mode the staged runtime dir has no node_modules, so node cannot
+ * resolve the bundle's `playwright` import from the bundle location. The
+ * generator embeds node_modules/{playwright,playwright-core} as a base64 tar.gz
+ * (runtime/node_modules.tar.gz.mjs) — extract it into the staged dir. Falls
+ * back to walking up from the binary path for a workspace node_modules
+ * (checkout-style installs).
+ */
+function stageRuntimeDeps(bundleDir: string): void {
+	const nm = join(bundleDir, "node_modules");
+	if (fs.existsSync(join(nm, "playwright"))) return;
+	const b64File = join(bundleDir, "node_modules.tar.gz.mjs");
+	if (fs.existsSync(b64File)) {
+		try {
+			const gz = join(bundleDir, "node_modules.tar.gz");
+			fs.writeFileSync(gz, Buffer.from(fs.readFileSync(b64File, "utf8"), "base64"));
+			const proc = Bun.spawnSync(["tar", "-xzf", gz, "-C", bundleDir]);
+			fs.rmSync(gz, { force: true });
+			if (proc.exitCode === 0 && fs.existsSync(join(nm, "playwright"))) return;
+		} catch {
+			// fall through to the workspace walk
+		}
+	}
+	linkStagedBundleDeps(bundleDir);
+}
+
+/** Playwright's pinned chromium cache dir for playwright 1.58.2. */
+const CHROMIUM_CACHE_DIR = "chromium-1208";
+
+/** Release-asset platform tag (matches release_binary target_id rows). */
+function platformTag(): string {
+	const arch = process.arch === "arm64" ? "arm64" : "x64";
+	if (process.platform === "win32") return `win32-${arch}`;
+	if (process.platform === "darwin") return `darwin-${arch}`;
+	return `linux-${arch}`;
+}
+
+/**
+ * Resolve the playwright browsers path. Precedence: PLAYWRIGHT_BROWSERS_PATH
+ * env → <exeDir>/browser-deps/ms-playwright (pre-extracted) → auto-extract the
+ * sidecar <exeDir>/omp-browser-deps-<tag>.tar.gz (the CI release asset) once →
+ * null (compiled mode then errors with instructions; dev falls back to
+ * playwright's default cache).
+ */
+function ensureBrowsers(): string | null {
+	if (process.env.PLAYWRIGHT_BROWSERS_PATH) return process.env.PLAYWRIGHT_BROWSERS_PATH;
+	const base = join(dirname(process.execPath), "browser-deps");
+	const extracted = join(base, "ms-playwright");
+	if (fs.existsSync(join(extracted, CHROMIUM_CACHE_DIR))) return extracted;
+	const sidecar = join(dirname(process.execPath), `omp-browser-deps-${platformTag()}.tar.gz`);
+	if (fs.existsSync(sidecar)) {
+		fs.mkdirSync(base, { recursive: true });
+		const proc = Bun.spawnSync(["tar", "-xzf", sidecar, "-C", base]);
+		if (proc.exitCode !== 0 || !fs.existsSync(join(extracted, CHROMIUM_CACHE_DIR))) {
+			throw new ToolError(`failed to extract browser deps from ${sidecar} (tar exit ${proc.exitCode})`);
+		}
+		return extracted;
+	}
+	return null;
 }
 
 const webCrawlDescription = `LLM-navigated crawl of a web application (vendored CyberStrike hackbrowser). Visits the target, discovers links/forms, captures EVERY request/response to <out>/requests.jsonl (JSONL: method, url, path, status, raw request, response, pageUrl), and auto-logs each capture into <out>/http.log (source: "crawl"). Options: scope (in-scope hosts; defaults to the target host), steps (navigation budget, default 10), user/pass + selU/selP (auto-login on the discovered form), sessionOut (export the authenticated session to a per-role dir: session.json + cookies.txt Netscape jar + headers.json — usable by curl -b/-c and scanners --token-a), sessionIn (restore a previously exported session for a continuation crawl). Requires a DeepSeek/Anthropic/OpenAI key (env or the session auth store).`;
@@ -116,12 +175,13 @@ export class WebCrawlTool implements AgentTool<typeof webCrawlSchema, WebCrawlTo
 			throw new ToolError(`crawl bundle not found: ${bundle} (build it with bun run build in packages/hackbrowser)`);
 		}
 		if (process.env.PI_COMPILED === "true") {
-			linkStagedBundleDeps(bundle);
-			if (!fs.existsSync(join(dirname(bundle), "node_modules"))) {
-				throw new ToolError(
-					"web_crawl in the compiled binary needs a workspace node_modules with playwright reachable from the binary (run the binary from inside the checkout)",
-				);
-			}
+			stageRuntimeDeps(dirname(bundle));
+		}
+		const browsersPath = ensureBrowsers();
+		if (process.env.PI_COMPILED === "true" && !browsersPath) {
+			throw new ToolError(
+				`web_crawl needs the playwright browser deps: download omp-browser-deps-${platformTag()}.tar.gz from the release and place it next to the executable (it auto-extracts to browser-deps/), or set PLAYWRIGHT_BROWSERS_PATH to an ms-playwright cache`,
+			);
 		}
 
 		const args = ["--url", params.url];
@@ -136,8 +196,16 @@ export class WebCrawlTool implements AgentTool<typeof webCrawlSchema, WebCrawlTo
 		const maxTimeout = this.session.settings.get("tools.maxTimeout");
 		const timeoutSec = clampTimeout("web_crawl", params.timeout, maxTimeout);
 		const proc = Bun.spawn(["node", bundle, ...args], {
-			cwd: join(import.meta.dir, "..", "..", "..", "hackbrowser"),
-			env: { ...process.env, [keyName]: process.env[keyName] as string, AI_SDK_LOG_WARNINGS: "false" },
+			cwd:
+				process.env.PI_COMPILED === "true"
+					? dirname(bundle)
+					: join(import.meta.dir, "..", "..", "..", "hackbrowser"),
+			env: {
+				...process.env,
+				[keyName]: process.env[keyName] as string,
+				...(browsersPath ? { PLAYWRIGHT_BROWSERS_PATH: browsersPath } : {}),
+				AI_SDK_LOG_WARNINGS: "false",
+			},
 			stdin: "ignore",
 			stdout: "pipe",
 			stderr: "pipe",
