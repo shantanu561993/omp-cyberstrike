@@ -109,7 +109,7 @@ The compiled binary is self-contained for skills/scanners/crawl code:
 into the staged runtime dir on first use). The ~170 MB browser builds are
 platform-specific and ship separately as `omp-browser-deps-<platform>.tar.gz`
 release assets — drop the file next to the executable and `web_crawl`
-auto-extracts it into `browser-deps/` on first run (or set
+auto-extracts it into `browser-deps/` on first run (built-in extractor — no external tools) (or set
 `PLAYWRIGHT_BROWSERS_PATH` yourself).
 
 ## Updating from upstream

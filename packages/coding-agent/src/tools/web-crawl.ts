@@ -4,6 +4,7 @@ import { type } from "@oh-my-pi/omptype";
 import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-pi/pi-agent-core";
 import { getPentestDir } from "../pentest/assets";
 import { appendLogEntry } from "../pentest/http-log";
+import { extractTarGz } from "../pentest/tar";
 import type { ToolSession } from "./index";
 import { ToolError } from "./tool-errors";
 import { clampTimeout } from "./tool-timeouts";
@@ -78,11 +79,9 @@ function stageRuntimeDeps(bundleDir: string): void {
 	const b64File = join(bundleDir, "node_modules.tar.gz.mjs");
 	if (fs.existsSync(b64File)) {
 		try {
-			const gz = join(bundleDir, "node_modules.tar.gz");
-			fs.writeFileSync(gz, Buffer.from(fs.readFileSync(b64File, "utf8"), "base64"));
-			const proc = Bun.spawnSync(["tar", "-xzf", gz, "-C", bundleDir]);
-			fs.rmSync(gz, { force: true });
-			if (proc.exitCode === 0 && fs.existsSync(join(nm, "playwright"))) return;
+			const archive = Buffer.from(fs.readFileSync(b64File, "utf8"), "base64");
+			extractTarGz(archive, bundleDir);
+			if (fs.existsSync(join(nm, "playwright"))) return;
 		} catch {
 			// fall through to the workspace walk
 		}
@@ -116,11 +115,13 @@ function ensureBrowsers(): string | null {
 	const sidecar = join(dirname(process.execPath), `omp-browser-deps-${platformTag()}.tar.gz`);
 	if (fs.existsSync(sidecar)) {
 		fs.mkdirSync(base, { recursive: true });
-		const proc = Bun.spawnSync(["tar", "-xzf", sidecar, "-C", base]);
-		if (proc.exitCode !== 0 || !fs.existsSync(join(extracted, CHROMIUM_CACHE_DIR))) {
-			throw new ToolError(`failed to extract browser deps from ${sidecar} (tar exit ${proc.exitCode})`);
+		try {
+			extractTarGz(fs.readFileSync(sidecar), base);
+		} catch (err) {
+			throw new ToolError(`failed to extract browser deps from ${sidecar}: ${(err as Error).message}`);
 		}
-		return extracted;
+		if (fs.existsSync(join(extracted, CHROMIUM_CACHE_DIR))) return extracted;
+		throw new ToolError(`browser deps extracted from ${sidecar} but ${CHROMIUM_CACHE_DIR} is missing`);
 	}
 	return null;
 }

@@ -796,7 +796,7 @@ jobs:
            shell: bash
            run: |
               set -euo pipefail
-              tar -czf "$RUNNER_TEMP/omp-browser-deps-${{ matrix.target_id }}.tar.gz" -C "$RUNNER_TEMP" ms-playwright
+              tar --force-local -czf "$RUNNER_TEMP/omp-browser-deps-${{ matrix.target_id }}.tar.gz" -C "$RUNNER_TEMP" ms-playwright
               ls -la "$RUNNER_TEMP/omp-browser-deps-${{ matrix.target_id }}.tar.gz"
          - name: Upload browser deps artifact
            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
