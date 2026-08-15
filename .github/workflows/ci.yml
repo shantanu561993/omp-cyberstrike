@@ -796,8 +796,12 @@ jobs:
            shell: bash
            run: |
               set -euo pipefail
-              tar --force-local -czf "$RUNNER_TEMP/omp-browser-deps-${{ matrix.target_id }}.tar.gz" -C "$RUNNER_TEMP" ms-playwright
-              ls -la "$RUNNER_TEMP/omp-browser-deps-${{ matrix.target_id }}.tar.gz"
+              # Relative archive name from the temp dir: absolute Windows paths
+              # (D:\...) make GNU tar parse the archive as remote-host syntax,
+              # and --force-local is not portable to every BSD tar.
+              cd "$RUNNER_TEMP"
+              tar -czf "omp-browser-deps-${{ matrix.target_id }}.tar.gz" ms-playwright
+              ls -la "omp-browser-deps-${{ matrix.target_id }}.tar.gz"
          - name: Upload browser deps artifact
            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
            with:
