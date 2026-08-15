@@ -154,8 +154,7 @@ export class MethodologyTool implements AgentTool<typeof methodologySchema, Meth
 					content: [
 						{
 							type: "text",
-							text:
-								`phase '${params.phase}' started` + (started > 0 ? `; todo '${params.phase}' in_progress` : ""),
+							text: `phase '${params.phase}' started${started > 0 ? `; todo '${params.phase}' in_progress` : ""}`,
 						},
 					],
 					details: { action: "start", phase: params.phase },
