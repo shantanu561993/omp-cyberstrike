@@ -44,7 +44,8 @@ remote-execution protocol), re-implemented as in-tree OMP features:
 
 | Feature | Where | What it does |
 |---|---|---|
-| 143 embedded skills (142 hidden + `web-pentest` umbrella) | `packages/coding-agent/src/pentest/skills/` | OWASP WSTG 4.2 checklist + attack playbooks, loaded on demand via `skill://` (small-context friendly: nothing auto-injected) |
+| 143 embedded skills (142 hidden + `web-pentest` umbrella) + 143 companion payload files | `packages/coding-agent/src/pentest/skills/` | OWASP WSTG 4.2 checklist + attack playbooks, loaded on demand via `skill://` (small-context friendly: nothing auto-injected); payload lists, DB variants and test scripts live in per-skill companions (`payloads.md`, `refs.md`, `scripts/`) |
+| Skill authoring contract + validation | `skills/web-pentest/SKILL-AUTHORING.md` · `scripts/check-pentest-skills.ts` · `test/pentest/skills-catalog.test.ts` | canonical rules (frontmatter schema, section template, ≤200-line budget, OMP-native execution, state contract); checker with `--filter`/`--fix` (regenerates `INDEX.md` — never hand-edited); catalog contract test runs in CI |
 | 16 attack scanners | `src/pentest/scanners/` | cors_checker, idor_tester, ssti_tester, ssrf_listener, jwt_tamper, … via the `attack_script` tool |
 | 7 built-in tools | `tools/` | `attack_script`, `methodology`, `web_crawl`, `bolt`, `bolt_status`, `http_log`, `session_bot` |
 | Vendored crawler | `packages/hackbrowser/` (AGPL, attributed) | LLM-navigated crawl with full HTTP capture, **session export** (Netscape jar + auth headers) |
@@ -68,8 +69,38 @@ remote-execution protocol), re-implemented as in-tree OMP features:
    action budget (`--phase-budget N`), structured handover relay, findings
    ledger `F<seq>` append-only, `methodology` coverage audit, `report.md` with
    coverage + findings tables.
+   Workers may DM `Main` via `hub` on confirmed P1s or escalation needs
+   (never blocking — the handover stays primary), and continuation workers
+   can read `history://<prev-task-id>` for transcript-only evidence.
 5. **Audit** — every HTTP interaction lands in `<out>/http.log`; bodies in
    `<out>/responses/`; all state survives compaction (files are the memory).
+
+## Skill authoring & validation
+
+Every skill in `packages/coding-agent/src/pentest/skills/<name>/SKILL.md`
+follows the contract in `skill://web-pentest/SKILL-AUTHORING.md` (frontmatter
+schema, section template, size budget, OMP-native execution, small-context
+state rules). Payloads that do not fit the ≤200-line / ≤12-line-code-block
+budget move to per-skill companions, loaded as `skill://<name>/<path>`.
+
+```sh
+bun scripts/check-pentest-skills.ts            # validate all skills (exit 0 = clean)
+bun scripts/check-pentest-skills.ts --filter 'wstg-inpv-*'   # validate a slice
+bun scripts/check-pentest-skills.ts --fix      # regenerate both INDEX.md copies (never hand-edit them)
+bun run check:pentest-skills                   # root alias for the checker
+```
+
+CI enforces the same contract through `test/pentest/skills-catalog.test.ts`
+(native bucket): frontmatter keys, hide rules, owasp_id ↔ methodology
+`wstgIds` sync, line budgets, section templates, `skill://` link resolution,
+INDEX byte-identity. Skills stay small-context-first: state lives in files,
+`## When to run`/`## Done when` are mandatory, no forward references.
+
+OMP-native execution is wired into the skills themselves: scanners via the
+`attack_script` tool, interactive client-side tests via `browser`, OSINT via
+`web_search`, GitHub disclosure recon via `issue://`/`pr://` (optional,
+cache-configured), live worker steering via `hub`, continuation evidence via
+`history://`.
 
 ## Docker-first execution
 
@@ -103,6 +134,7 @@ Key env: `DEEPSEEK_API_KEY` (crawler + harness); the agent dir
 bun install                                   # workspace deps
 bun scripts/port-cyberstrike-skills.ts ...    # re-port skills/scanners (idempotent)
 bun scripts/gen-pentest-assets.ts             # regenerate src/pentest/assets.ts (run after hackbrowser bundle builds)
+bun scripts/check-pentest-skills.ts             # validate skills against SKILL-AUTHORING.md (--fix regenerates INDEX.md)
 bun --cwd=packages/hackbrowser run build      # crawl.mjs + session-bot.mjs bundles (committed)
 cd packages/coding-agent && bun run build     # dist/omp compiled binary (Linux)
 ```
@@ -164,6 +196,9 @@ conflict-free; when the version bumps, re-materialize the pi-natives addons
 push this branch upstream** — the ported CyberStrike content is AGPL and must
 stay copy-local (see `packages/coding-agent/src/pentest/ATTRIBUTION.md` and
 `packages/hackbrowser/ATTRIBUTION.md`).
+OMP-authored additions (SKILL-AUTHORING.md, checker, catalog test,
+orchestration) are MIT like the rest of the repo; ported content stays
+AGPL-3.0/CC-BY-SA — see ATTRIBUTION.md for the split.
 
 ## Authorized use only
 
