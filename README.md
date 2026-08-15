@@ -112,6 +112,32 @@ release assets — drop the file next to the executable and `web_crawl`
 auto-extracts it into `browser-deps/` on first run (built-in extractor — no external tools) (or set
 `PLAYWRIGHT_BROWSERS_PATH` yourself).
 
+## Installing the release binary
+
+Prebuilt binaries and their browser dependencies ship as GitHub Release assets
+(`v0.1.x` tags) — no build, no Docker required.
+
+1. **Download two files** from the [Releases](https://github.com/shantanu561993/omp-cyberstrike/releases) page:
+   - the binary for your platform: `omp-linux-x64`, `omp-linux-arm64`,
+     `omp-windows-x64.exe`, `omp-darwin-x64`, or `omp-darwin-arm64`
+   - the matching browser bundle: `omp-browser-deps-<same-platform>.tar.gz`
+2. **Put both in the same folder.** The binary is self-contained for all code
+   (embedded skills, scanners, crawler bundles, playwright packages); the
+   ~170 MB browser builds are the only platform-specific extra. On the first
+   `web_crawl` the binary extracts the bundle into `browser-deps/` next to
+   itself — built-in extractor, no tar/unzip/installer needed.
+3. **Run it**: `./omp` (TUI) or `./omp --model <model> --api-key <key> -p "…"`.
+   Configure the model key once via the agent dir (`~/.omp/agent`, `/login`)
+   or pass it per-run. Then `/pentest <url>` or `web_crawl` work out of the box.
+
+Runtime prerequisites for two optional features (the harness itself needs
+none): **Node.js 18+** is required for `web_crawl` (the crawler bundle runs
+under `node`) and **Python 3** for the `attack_script` scanners. Without
+either, the respective tool errors clearly.
+
+Not crawling? Skip step 2 — every other feature (skills, scanners, `/pentest`
+with `--no-crawl`, Bolt, http_log, session bot) works from the bare binary.
+
 ## Updating from upstream
 
 ```sh
