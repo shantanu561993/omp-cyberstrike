@@ -61,7 +61,10 @@ remote-execution protocol), re-implemented as in-tree OMP features:
 2. **Crawl** (optional) — `web_crawl` captures every request; authenticated
    sessions are exported per account and guarded by session bots.
 3. **Tier 1 sweep** — every applicable scanner runs against all captured endpoints (`<out>/sweep/<scanner>.log`).
-4. **Tier 2 phases** — one `web-pentester` worker per methodology phase, fixed
+4. **Tier 2 phases** — `web-pentester` workers; granularity decided at setup
+   via a mandatory ask (`phase`: one worker per methodology phase — fewest
+   spawns, large-context friendly | `skill`: one worker per skill — tiny
+   isolated contexts, small-context-model friendly), fixed
    action budget (`--phase-budget N`), structured handover relay, findings
    ledger `F<seq>` append-only, `methodology` coverage audit, `report.md` with
    coverage + findings tables.
