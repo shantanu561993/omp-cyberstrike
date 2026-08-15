@@ -115,9 +115,14 @@ auto-extracts it into `browser-deps/` on first run (built-in extractor — no ex
 ## Installing the release binary
 
 Prebuilt binaries and their browser dependencies ship as GitHub Release assets
-(`v0.1.x` tags) — no build, no Docker required.
+— no build, no Docker required. Two channels:
 
-1. **Download two files** from the [Releases](https://github.com/shantanu561993/omp-cyberstrike/releases) page:
+- **`latest` (rolling)** — rebuilt on every push to `main`. This is what exe
+  users should download: the newest binary is always at
+  https://github.com/shantanu561993/omp-cyberstrike/releases/latest.
+- **Versioned tags (`v0.1.x`)** — stable snapshots for pinning.
+
+1. **Download two files** from the release:
    - the binary for your platform: `omp-linux-x64`, `omp-linux-arm64`,
      `omp-windows-x64.exe`, `omp-darwin-x64`, or `omp-darwin-arm64`
    - the matching browser bundle: `omp-browser-deps-<same-platform>.tar.gz`
@@ -129,6 +134,10 @@ Prebuilt binaries and their browser dependencies ship as GitHub Release assets
 3. **Run it**: `./omp` (TUI) or `./omp --model <model> --api-key <key> -p "…"`.
    Configure the model key once via the agent dir (`~/.omp/agent`, `/login`)
    or pass it per-run. Then `/pentest <url>` or `web_crawl` work out of the box.
+
+To update: re-download the two files from `releases/latest` and replace them
+in place (same folder — `browser-deps/` is reused; only re-extracts when the
+browser pin changes).
 
 Runtime prerequisites for two optional features (the harness itself needs
 none): **Node.js 18+** is required for `web_crawl` (the crawler bundle runs
