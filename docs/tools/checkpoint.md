@@ -60,7 +60,7 @@ No checkpoint ID, artifact URI, job handle, file path, or restore token is retur
 
 ```text
 <system-warning>
-You are in an active checkpoint. You MUST call rewind with your investigation findings before yielding. Do NOT yield without completing the checkpoint.
+You are in an active checkpoint. You MUST call rewind with your investigation findings before yielding. NEVER yield without completing the checkpoint.
 </system-warning>
 ```
 

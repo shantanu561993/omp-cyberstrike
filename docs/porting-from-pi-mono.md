@@ -65,7 +65,7 @@ We run on Bun, but the current source intentionally mixes Bun APIs with small No
 - Env loading: `dotenv` → Bun loads `.env` automatically
 - Runtime text/assets: prefer Bun imports such as `with { type: "text" }` or `Bun.file()` over copy steps or bundled fallback file reads.
 
-**DO NOT replace (these work fine in Bun):**
+**NEVER replace (these work fine in Bun):**
 
 - `os.homedir()` — do NOT replace with `Bun.env.HOME` or literal `"~"`
 - `os.tmpdir()` — do NOT replace with `Bun.env.TMPDIR || "/tmp"` or hardcoded paths
