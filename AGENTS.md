@@ -233,6 +233,25 @@ For the bash tool specifically:
 - Never use `tsc`/`npx tsc` — always `bun check`.
 - Merge commits (maintainer merges of PRs) follow: `Merge PR #<number>: <conventional PR subject> (@<author>)` — e.g. `Merge PR #6386: feat(catalog): add native Meta Model API provider (@eggpeat)`.
 
+## Pentest Skills
+
+Web-pentest skills live in `packages/coding-agent/src/pentest/skills/<name>/SKILL.md`
+(one-level layout; companion files in the same dir load via `skill://<name>/<path>`).
+
+- Every new or changed skill MUST follow `skill://web-pentest/SKILL-AUTHORING.md`
+  (frontmatter schema, section template, size budget, state contract) and pass
+  `bun scripts/check-pentest-skills.ts` (repo root; `--filter <glob>` for a slice,
+  `--fix` regenerates INDEX.md). The catalog contract is also enforced by
+  `test/pentest/skills-catalog.test.ts` (CI native bucket).
+- `packages/coding-agent/src/pentest/INDEX.md` and
+  `.../skills/web-pentest/INDEX.md` are GENERATED — never hand-edit them; run
+  the check script with `--fix` after changing frontmatter (descriptions,
+  names, owasp ids).
+- Pentest skills must never set `globs` or `alwaysApply` frontmatter — they
+  would auto-inject pentest content into every session.
+- Ported skill content is AGPL-3.0/CC-BY-SA (CyberStrike/WSTG) — never
+  upstream it to `can1357/oh-my-pi`; record provenance in ATTRIBUTION.md.
+
 ## Testing Guidance
 
 Test the contract the system exposes — not the easiest internal detail to assert.
