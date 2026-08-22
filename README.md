@@ -75,6 +75,21 @@ remote-execution protocol), re-implemented as in-tree OMP features:
 5. **Audit** — every HTTP interaction lands in `<out>/http.log`; bodies in
    `<out>/responses/`; all state survives compaction (files are the memory).
 
+**Optional engagement tooling (merged from upstream):**
+
+- **SSH staging** — `read`/`grep`/`write` accept `ssh://<host>/<path>` for
+  authorized target infra (UTF-8 text ≤ 1 MiB, dir listings). Hosts come
+  from `ssh.json`/`.ssh.json` in the working directory
+  (`{ "hosts": { "<name>": { "host": ..., "username": ..., "port": N,
+  "keyPath": ... } } }`) or `~/.ssh/config` aliases; larger/binary transfer
+  via `bash` + `scp`/`sftp`.
+- **Engagement memory** — `omp config set memory.backend mnemopi` enables
+  local SQLite retain/recall (searchable, no external service); `hindsight`
+  uses the Vectorize remote service, `local` the summary pipeline only. With
+  a backend on, the pentester persists phase state (findings, endpoints,
+  creds inventory, do-not-touch) via `retain` and resumes later engagements
+  on the same target via `reflect` (`/memory stats` for status).
+
 ## Skill authoring & validation
 
 Every skill in `packages/coding-agent/src/pentest/skills/<name>/SKILL.md`
