@@ -16,13 +16,17 @@ import {
 // past macOS's 104-byte sun_path once OpenSSH appends its mux temp suffix.
 describe("SSH control-path budget (#9070)", () => {
 	it("rejects a control dir that overflows sun_path once %C.sock + mux temp bind is added", () => {
-		// A representative macOS named-profile control dir is 48 bytes; the
-		// temporary bind path is 48 + 63 = 111 >= 104, so it must not fit.
+		// A representative macOS named-profile control dir is 60 bytes (the
+		// fork's .omp-cyberstrike root is longer than upstream's .omp); the
+		// temporary bind path is 60 + 1 + 63 = 124 >= 104, so it must not fit.
 		const profileDir = "/Users/arthur/.omp-cyberstrike/profiles/upstream/ssh-control";
-		expect(Buffer.byteLength(profileDir)).toBe(48);
+		expect(Buffer.byteLength(profileDir)).toBe(60);
 		expect(controlPathFitsBudget(profileDir, "darwin")).toBe(false);
-		// The default (unprofiled) macOS dir stays within budget.
-		expect(controlPathFitsBudget("/Users/arthur/.omp-cyberstrike/ssh-control", "darwin")).toBe(true);
+		// The default (unprofiled) macOS dir also overflows with the longer
+		// fork root (42 + 1 + 63 = 106 >= 104)...
+		expect(controlPathFitsBudget("/Users/arthur/.omp-cyberstrike/ssh-control", "darwin")).toBe(false);
+		// ...so a short home is what stays within budget now.
+		expect(controlPathFitsBudget("/u/.omp-cyberstrike/ssh-control", "darwin")).toBe(true);
 	});
 
 	it("places the darwin boundary at 40 bytes of control dir", () => {
@@ -46,7 +50,7 @@ describe("sshControlFallbackDir", () => {
 		const a = sshControlFallbackDir(canonicalDir, 501);
 		const b = sshControlFallbackDir(canonicalDir, 501);
 		expect(a).toBe(b);
-		expect(a).toBe("/tmp/omp-5434354bc38f9a50fbbd");
+		expect(a).toBe("/tmp/omp-02b44308b6ebed72e574");
 		expect(Buffer.byteLength(a)).toBe(29);
 		const tempBind = path.join(a, `${"a".repeat(40)}.sock.${"b".repeat(16)}`);
 		expect(Buffer.byteLength(tempBind)).toBe(92);
@@ -65,7 +69,7 @@ describe("sshControlFallbackDir", () => {
 
 describe("resolveSshControlDir", () => {
 	it("keeps the canonical dir when it fits", () => {
-		const canonicalDir = "/Users/arthur/.omp-cyberstrike/ssh-control";
+		const canonicalDir = "/u/.omp-cyberstrike/ssh-control";
 		expect(resolveSshControlDir({ canonicalDir, platform: "darwin", uid: 501 })).toEqual({
 			dir: canonicalDir,
 			shared: false,
@@ -75,7 +79,7 @@ describe("resolveSshControlDir", () => {
 	it("relocates to the bounded shared fallback when the canonical dir overflows", () => {
 		const canonicalDir = "/Users/arthur/.omp-cyberstrike/profiles/upstream/ssh-control";
 		const choice = resolveSshControlDir({ canonicalDir, platform: "darwin", uid: 501, tmpBase: "/tmp" });
-		expect(choice).toEqual({ dir: "/tmp/omp-5434354bc38f9a50fbbd", shared: true });
+		expect(choice).toEqual({ dir: "/tmp/omp-02b44308b6ebed72e574", shared: true });
 		expect(controlPathFitsBudget(choice.dir, "darwin")).toBe(true);
 	});
 

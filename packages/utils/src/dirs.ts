@@ -22,8 +22,17 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { engines, version } from "../package.json" with { type: "json" };
 
-/** App name (e.g. "omp-cyberstrike") */
+/** App name (e.g. "omp-cyberstrike") — identity for dirs, logs, XDG folders. */
 export const APP_NAME: string = "omp-cyberstrike";
+
+/**
+ * CLI program name shown in usage/help/completion output. Distinct from
+ * {@link APP_NAME}: the fork's binary is still installed as `omp`, so
+ * user-facing strings (`Run \`omp --help\``, `#compdef omp`, completion
+ * callbacks invoking `command omp __complete`) must match the executable the
+ * user actually runs. Rename the binary and this constant together.
+ */
+export const CLI_NAME: string = "omp";
 
 /** Config directory name (e.g. ".omp-cyberstrike") */
 export const CONFIG_DIR_NAME: string = ".omp-cyberstrike";

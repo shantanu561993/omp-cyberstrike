@@ -272,13 +272,17 @@ jobs:
               fi
 
          # ---- main path: bazel build of all Linux-hosted targets ----
+         # Forks build from source too (mirroring upstream): the published npm
+         # leaves lag the monorepo version (e.g. 17.4.2 leaves vs a 17.4.4
+         # loader), so fetching them embeds addons the loader rejects with a
+         # version-sentinel mismatch.
          - id: cache
-           if: github.event_name != 'pull_request' && github.repository == 'can1357/oh-my-pi'
+           if: github.event_name != 'pull_request'
            uses: ./.github/actions/bazel-cache
            with:
               scope: linux
          - name: Build native addons once
-           if: github.event_name != 'pull_request' && github.repository == 'can1357/oh-my-pi'
+           if: github.event_name != 'pull_request'
            run: |
               set -eo pipefail
               if [ "$(ulimit -Sn)" != unlimited ] && [ "$(ulimit -Sn)" -lt 65536 ]; then ulimit -Sn 65536 || true; fi
@@ -306,7 +310,7 @@ jobs:
          # thousands of actions is the failure mode that made CI slow — make
          # it visible in the run summary instead of discovering it weeks in.
          - name: Report bazel cache stats
-           if: github.event_name != 'pull_request' && github.repository == 'can1357/oh-my-pi'
+           if: github.event_name != 'pull_request'
            shell: bash
            run: |
               # Bazel runs with --color=yes (config=ci); strip ANSI before
@@ -569,20 +573,11 @@ jobs:
               path: ~/.bun/install/cache
               key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
          - run: bun install --frozen-lockfile
-         # Forks have no bazel-built artifact: install the platform addon from
-         # its published npm leaf (@oh-my-pi/pi-natives-<target_id>), which the
-         # build's embed step picks up from packages/natives/native.
-         - name: Install native addons from npm (fork)
-           if: github.repository != 'can1357/oh-my-pi' && !startsWith(matrix.target_id, 'linux-musl')
-           shell: bash
-           run: |
-              set -euo pipefail
-              tarball="$(npm view "@oh-my-pi/pi-natives-${{ matrix.target_id }}" dist.tarball)"
-              curl -fsSL --retry 3 "$tarball" | tar -xz -C "$RUNNER_TEMP"
-              mkdir -p packages/natives/native
-              cp "$RUNNER_TEMP/package/"*.node packages/natives/native/
+         # Install the platform addon from the bazel-built artifact (the
+         # native_addons job builds from source for forks too — published npm
+         # leaves lag the monorepo version and fail the loader's sentinel
+         # check). Musl binaries get theirs from the artifact as well.
          - name: Install prebuilt native addon(s)
-           if: github.repository == 'can1357/oh-my-pi'
            uses: ./.github/actions/native-artifacts
            with:
               targets: ${{ matrix.native_targets }}
@@ -660,22 +655,10 @@ jobs:
               path: ~/.bun/install/cache
               key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
          - run: bun install --frozen-lockfile
-         # Forks have no bazel-built addon: use the published npm leaf (see
-         # release_binary). The embed step picks it up from packages/natives/native.
-         - name: Install native addons from npm (fork)
-           if: github.repository != 'can1357/oh-my-pi'
-           shell: bash
-           run: |
-              set -euo pipefail
-              tarball="$(npm view "@oh-my-pi/pi-natives-${{ matrix.target_id }}" dist.tarball)"
-              curl -fsSL --retry 3 "$tarball" | tar -xz -C "$RUNNER_TEMP"
-              mkdir -p packages/natives/native
-              cp "$RUNNER_TEMP/package/"*.node packages/natives/native/
-         # Darwin runners build their own architecture; cross-hosted artifacts
-         # do not exist for macOS. The warm workflow keeps these scopes seeded
-         # near HEAD, so this is normally the version-bump delta.
+         # Darwin addons are built from source on the mac runner (published
+         # npm leaves lag the monorepo version and fail the loader's sentinel
+         # check — same reason the linux/win32 rows use the bazel artifact).
          - name: Build native addon (bazel)
-           if: github.repository == 'can1357/oh-my-pi'
            uses: ./.github/actions/bazel-natives
            with:
               targets: ${{ matrix.native_targets }}
