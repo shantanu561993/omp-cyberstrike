@@ -321,6 +321,24 @@ jobs:
               summary=$(sed -E 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/bazel-build.log" | grep -E '[0-9]+ processes:' | tail -1 || true)
               echo "::notice title=Bazel build summary::${summary:-no process summary found}"
 
+         # Hosted runners need the disk cache saved explicitly (kata uses the
+         # cluster remote cache; without a save every main push rebuilds the
+         # six addons fully cold, ~60-75 min). Mirrors bazel-natives' save.
+         - name: Save bazel disk cache
+           if: github.event_name != 'pull_request' && steps.cache.outputs.save-needed == 'true'
+           uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+           with:
+              path: |
+                 ~/.cache/omp-bazel-disk
+                 ~/.cache/omp-bazel-repo
+              key: ${{ steps.cache.outputs.cache-key }}bazel-cache
+
+         # The staging step below shells out to `bun scripts/bazel-natives.ts`
+         # (cquery-based output location); the build loop itself only needs
+         # bazelisk, which hosted runners ship.
+         - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+           with:
+              bun-version: "1.4"
          # Assemble the artifact with the conventional per-target layout the
          # native-artifacts action expects (natives-<target>/<file>). On main
          # pushes the bazel outputs are located via the canonical cquery copy
