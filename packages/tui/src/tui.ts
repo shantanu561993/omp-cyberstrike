@@ -28,6 +28,7 @@ import {
 	encodeKittyDeletePlacement,
 	encodeKittyPlacementLine,
 	ImageProtocol,
+	isImageProtocolForced,
 	isInsideTerminalMultiplexer,
 	parseKittyDirectPlacementLine,
 	setCellDimensions,
@@ -215,6 +216,13 @@ export interface NativeScrollbackLiveRegion {
 	getNativeScrollbackLiveRegionStart(): number | undefined;
 	/** Keeps the mutable suffix viewport-local instead of recording frozen snapshots. */
 	isNativeScrollbackLiveRegionPinned?(): boolean;
+	/**
+	 * Local row where viewport pinning begins. When omitted, pinning (if
+	 * reported) starts at {@link getNativeScrollbackLiveRegionStart}. A nested
+	 * transcript uses this to keep an earlier unpinned live seam while still
+	 * capping commits at a later pinned dashboard (hub wait, todo snapshot).
+	 */
+	getNativeScrollbackLiveRegionPinnedStart?(): number | undefined;
 }
 
 export interface NativeScrollbackCommittedRows {
@@ -275,6 +283,13 @@ function isOverlayFocusTarget(owner: Component, component: Component | null): bo
 
 function getNativeScrollbackLiveRegionStart(component: Component): number | undefined {
 	return (component as Component & Partial<NativeScrollbackLiveRegion>).getNativeScrollbackLiveRegionStart?.();
+}
+
+function getNativeScrollbackLiveRegionPinnedStart(component: Component): number | undefined {
+	const start = (
+		component as Component & Partial<NativeScrollbackLiveRegion>
+	).getNativeScrollbackLiveRegionPinnedStart?.();
+	return start === undefined || !Number.isFinite(start) ? undefined : start;
 }
 
 /**
@@ -358,6 +373,27 @@ export interface RenderRequestOptions {
 	/** Clear terminal scrollback for intentional transcript replacement. */
 	clearScrollback?: boolean;
 }
+
+/**
+ * What a settled in-place width resize (multiplexer pane or an in-place-latched
+ * direct terminal) does to native scrollback, which the host rewrapped at the
+ * old width:
+ * - `append`: replay the transcript at the current width below the old-wrap
+ *   history — one fresh copy per settled resize, nothing destroyed.
+ * - `rebuild`: clear native history first (ED3) and replay — history holds the
+ *   transcript exactly once at the current width. Requires a host that honors
+ *   an inner ED3 (tmux does; GNU screen ignores it, degrading to `append`),
+ *   and erases pre-session pane history.
+ * - `preserve`: repaint the viewport only — zero history growth; scrollback
+ *   keeps the old-width wrap until content next scrolls off.
+ *
+ * The raw engine defaults to `preserve` (append-only native scrollback, the
+ * engine's baseline contract); `PI_TUI_RESIZE_SCROLLBACK` overrides that
+ * initial value. The coding agent applies its `tui.resizeScrollback` setting
+ * (default `append`) on top at startup, so interactive sessions refresh
+ * stale-width history out of the box.
+ */
+export type ResizeScrollbackMode = "rebuild" | "append" | "preserve";
 
 /** Type guard to check if a component implements Focusable */
 export function isFocusable(component: Component | null): component is Component & Focusable {
@@ -705,12 +741,18 @@ export class Container
 		}
 		for (let leadingIndex = 0; leadingIndex < marker.leading.length; leadingIndex++) {
 			const captured = marker.leading[leadingIndex]!;
-			const currentRows = this.#memoChildLines[leadingIndex]!;
+			// Resolution runs only inside a width epoch, where a leading child's
+			// physical row count legitimately changes with the new wrap — comparing
+			// it to the captured count conflates reflow with mutation and fails
+			// resolution for every wrapping revisionless child. Identity plus the
+			// width-independent revision (when the component reports one) is the
+			// stability proof; a revisionless leading child that mutated in the
+			// settle window degrades to the accepted stale-history tradeoff, the
+			// same as any off-window mutation of committed rows.
 			if (
 				this.#memoChildren[leadingIndex] !== captured.component ||
-				(captured.revision === undefined
-					? currentRows.length !== captured.rowCount
-					: getNativeScrollbackWidthEpochRevision(captured.component) !== captured.revision)
+				(captured.revision !== undefined &&
+					getNativeScrollbackWidthEpochRevision(captured.component) !== captured.revision)
 			) {
 				return undefined;
 			}
@@ -900,6 +942,8 @@ interface FrameSegment {
 	widthEpochRevision?: number;
 	liveLocalStart?: number;
 	liveRegionPinned: boolean;
+	/** Local pin start; when omitted, pinning begins at `liveLocalStart`. */
+	liveRegionPinnedStart?: number;
 }
 
 /** Depth-first identity search through `Container`-shaped children. */
@@ -1249,7 +1293,6 @@ export class TUI extends Container {
 	#hardwareCursorState: HardwareCursorState | null = null;
 	#hardwareCursorVisibilityKnown = false;
 	#hardwareCursorVisible = false;
-	#sixelProbePendingDa = false;
 	#sixelProbePendingGraphics = false;
 	#sixelProbeBuffer = "";
 	#sixelProbeTimeout?: NodeJS.Timeout;
@@ -1332,6 +1375,12 @@ export class TUI extends Container {
 	#previousWindow: string[] = [];
 	#nativeScrollbackLiveRegionStart: number | undefined;
 	#nativeScrollbackLiveRegionPinned = false;
+	// Start row of the topmost live region that pinned itself. The topmost seam
+	// governs the exactness boundary and the frame-wide pin policy, but a pinned
+	// region BELOW an unpinned seam (an anchored HUD/panel under a streaming
+	// transcript) still must never commit its rows to native scrollback. This is
+	// the ceiling no commit may cross, independent of the topmost seam's policy.
+	#nativeScrollbackPinnedBoundary: number | undefined;
 	#fullRedrawCount = 0;
 	// Caps how many inline images render as live graphics; older ones fall back
 	// to text via a purge + full redraw. Cap is configured by the host app.
@@ -1351,6 +1400,20 @@ export class TUI extends Container {
 	#hasEverRendered = false;
 	#scrollbackRebuildEnabled =
 		Bun.env.PI_TUI_SCROLLBACK_REBUILD === "1" || Bun.env.PI_TUI_SCROLLBACK_REBUILD === "true";
+	#resizeScrollbackMode: ResizeScrollbackMode = TUI.#initialResizeScrollbackMode();
+	static #initialResizeScrollbackMode(): ResizeScrollbackMode {
+		const raw = Bun.env.PI_TUI_RESIZE_SCROLLBACK;
+		return raw === "rebuild" || raw === "preserve" || raw === "append" ? raw : "preserve";
+	}
+	// A width epoch settled while a visible overlay froze commits, so the
+	// resize-scrollback refresh could not run. Consumed by the first uncovered
+	// authoritative normal-screen render so the stale old-width history is
+	// repaired even if no further resize arrives. Any full paint clears it,
+	// including one that fires while an overlay is still visible (session
+	// replace, divergence rebuild): a full paint re-emits the committed prefix
+	// from the recomposed current-width frame, which is exactly the refresh
+	// this latch is waiting for — it supersedes the pending replay.
+	#resizeScrollbackReplayPending = false;
 	// Set by the terminal resize callback; consumed by the next render. A resize
 	// event invalidates the committed screen even when the dimensions net out
 	// unchanged by render time (e.g. a 6→4→6 round trip coalesced into one frame
@@ -1366,6 +1429,13 @@ export class TUI extends Container {
 	#multiplexerResizeTimer: RenderTimer | undefined;
 	#deferredForcedClearScrollback = false;
 	#multiplexerResizeHasPendingRender = false;
+	// Rows a mux pane pushed into its own scrollback on a height-only shrink
+	// without the engine committing them, plus the commit seam at push time.
+	// A later height grow pulls the pane's scrollback tail back into the grid:
+	// the pushed rows come out first — but only while no commit has buried
+	// them — and only the remainder of the pull removes committed rows.
+	#muxPushedRows = 0;
+	#muxPushSeam = 0;
 	// True from the first SIGWINCH of a non-multiplexer drag until the settle
 	// timer fires. While set, every `#doRender` short-circuits to the viewport
 	// fast path (`#renderResizeViewport`) instead of an authoritative full
@@ -1522,11 +1592,17 @@ export class TUI extends Container {
 		for (let index = 0; index < marker.leading.length; index++) {
 			const captured = marker.leading[index]!;
 			const current = this.#frameSegments[index];
+			// Width epoch context: a leading root child's row count legitimately
+			// changes with the new wrap (the startup banner and warning texts wrap
+			// differently per width), so a captured-vs-current row count comparison
+			// conflates reflow with mutation and forces the conservative replay on
+			// every width change. Identity plus the width-independent revision
+			// (when reported) proves stability; a revisionless leading child that
+			// mutated inside the settle window degrades to the accepted
+			// stale-history tradeoff instead of failing resolution.
 			if (
 				current?.component !== captured.component ||
-				(captured.revision === undefined
-					? current.rowCount !== captured.rowCount
-					: current.widthEpochRevision !== captured.revision)
+				(captured.revision !== undefined && current.widthEpochRevision !== captured.revision)
 			) {
 				return undefined;
 			}
@@ -1625,6 +1701,7 @@ export class TUI extends Container {
 		width = Math.max(1, width);
 		this.#nativeScrollbackLiveRegionStart = undefined;
 		this.#nativeScrollbackLiveRegionPinned = false;
+		this.#nativeScrollbackPinnedBoundary = undefined;
 		const children = this.children;
 		const previousSegments = this.#frameSegments;
 		const segments: FrameSegment[] = new Array(children.length);
@@ -1654,12 +1731,14 @@ export class TUI extends Container {
 			let childLines: readonly string[];
 			let liveLocalStart: number | undefined;
 			let liveRegionPinned = false;
+			let liveRegionPinnedStart: number | undefined;
 			let widthEpochRevision: number | undefined;
 			let reported: number | undefined;
 			if (reuse) {
 				childLines = previous.lines;
 				liveLocalStart = previous.liveLocalStart;
 				liveRegionPinned = previous.liveRegionPinned;
+				liveRegionPinnedStart = previous.liveRegionPinnedStart;
 				widthEpochRevision = previous.widthEpochRevision;
 			} else {
 				// Feed the engine's committed-row claim (from the previous frame's
@@ -1690,6 +1769,15 @@ export class TUI extends Container {
 					liveRegionPinned =
 						(child as Component & Partial<NativeScrollbackLiveRegion>).isNativeScrollbackLiveRegionPinned?.() ===
 						true;
+					if (liveRegionPinned) {
+						const pinStart = getNativeScrollbackLiveRegionPinnedStart(child);
+						if (pinStart !== undefined) {
+							liveRegionPinnedStart = Math.max(
+								liveLocalStart,
+								Math.min(childLines.length, Math.trunc(pinStart)),
+							);
+						}
+					}
 				}
 				// Consume the stability report unconditionally for implementers:
 				// reading re-bases the component's baseline to the state this
@@ -1705,9 +1793,18 @@ export class TUI extends Container {
 			// transcript) must never overwrite it — moving the boundary down
 			// would commit the earlier child's still-mutable rows as stale
 			// history.
-			if (liveLocalStart !== undefined && this.#nativeScrollbackLiveRegionStart === undefined) {
-				this.#nativeScrollbackLiveRegionStart = offset + liveLocalStart;
-				this.#nativeScrollbackLiveRegionPinned = liveRegionPinned;
+			if (liveLocalStart !== undefined) {
+				const start = offset + liveLocalStart;
+				if (this.#nativeScrollbackLiveRegionStart === undefined) {
+					this.#nativeScrollbackLiveRegionStart = start;
+					this.#nativeScrollbackLiveRegionPinned = liveRegionPinned;
+				}
+				// A pinned region anywhere in the frame caps commits at its start,
+				// even when an earlier unpinned seam won the topmost merge above:
+				// its rows (a growing anchored panel) must never reach scrollback.
+				if (liveRegionPinned && this.#nativeScrollbackPinnedBoundary === undefined) {
+					this.#nativeScrollbackPinnedBoundary = offset + (liveRegionPinnedStart ?? liveLocalStart);
+				}
 			}
 			if (chainStable) {
 				if (previous !== undefined && previous.component === child && previous.start === offset) {
@@ -1738,6 +1835,7 @@ export class TUI extends Container {
 				widthEpochRevision,
 				liveLocalStart,
 				liveRegionPinned,
+				liveRegionPinnedStart,
 			};
 			offset += childLines.length;
 		}
@@ -1773,12 +1871,75 @@ export class TUI extends Container {
 	}
 
 	/**
+	 * Replace the cursor markers contributed by one fixed-size root segment.
+	 * The ledger stays sorted by absolute frame row; entries belonging to later
+	 * siblings move as one tail and otherwise retain their identity.
+	 */
+	#replaceFrameCursorMarkers(startRow: number, lines: readonly string[]): void {
+		const markers = this.#frameCursorMarkers;
+		const endRow = startRow + lines.length;
+		let intervalStart = 0;
+		while (intervalStart < markers.length && markers[intervalStart]!.row < startRow) intervalStart++;
+		let intervalEnd = intervalStart;
+		while (intervalEnd < markers.length && markers[intervalEnd]!.row < endRow) intervalEnd++;
+
+		let nextCount = 0;
+		for (let row = 0; row < lines.length; row++) {
+			if (lines[row]!.includes(CURSOR_MARKER)) nextCount++;
+		}
+
+		const previousCount = intervalEnd - intervalStart;
+		const delta = nextCount - previousCount;
+		const previousLength = markers.length;
+		if (delta > 0) {
+			markers.length = previousLength + delta;
+			for (let index = previousLength - 1; index >= intervalEnd; index--) {
+				markers[index + delta] = markers[index]!;
+			}
+		} else if (delta < 0) {
+			for (let index = intervalEnd; index < previousLength; index++) {
+				markers[index + delta] = markers[index]!;
+			}
+			markers.length = previousLength + delta;
+		}
+
+		const reusableCount = Math.min(previousCount, nextCount);
+		let markerSlot = intervalStart;
+		for (let row = 0; row < lines.length; row++) {
+			const line = lines[row]!;
+			const markerIndex = line.indexOf(CURSOR_MARKER);
+			if (markerIndex === -1) continue;
+			const absoluteRow = startRow + row;
+			const col = visibleWidth(line.slice(0, markerIndex));
+			if (markerSlot < intervalStart + reusableCount) {
+				const marker = markers[markerSlot]!;
+				marker.row = absoluteRow;
+				marker.col = col;
+			} else {
+				markers[markerSlot] = { row: absoluteRow, col };
+			}
+			markerSlot++;
+		}
+	}
+
+	/** Strip every internal cursor sentinel from one rendered row. */
+	#stripCursorMarkers(line: string, markerIndex = line.indexOf(CURSOR_MARKER)): string {
+		if (markerIndex === -1) return line;
+		let stripped = line;
+		while (markerIndex !== -1) {
+			stripped = stripped.slice(0, markerIndex) + stripped.slice(markerIndex + CURSOR_MARKER.length);
+			markerIndex = stripped.indexOf(CURSOR_MARKER, markerIndex);
+		}
+		return stripped;
+	}
+
+	/**
 	 * Append one row to the composed frame, stripping CURSOR_MARKER occurrences
 	 * (internal sentinels that must never reach the terminal, the committed
 	 * prefix, or the resync audit) and recording the first marker's position.
 	 */
 	#ingestFrameRow(line: string): void {
-		let markerIndex = line.indexOf(CURSOR_MARKER);
+		const markerIndex = line.indexOf(CURSOR_MARKER);
 		if (markerIndex === -1) {
 			this.#composedFrame.push(line);
 			return;
@@ -1787,12 +1948,7 @@ export class TUI extends Container {
 			row: this.#composedFrame.length,
 			col: visibleWidth(line.slice(0, markerIndex)),
 		});
-		let stripped = line;
-		while (markerIndex !== -1) {
-			stripped = stripped.slice(0, markerIndex) + stripped.slice(markerIndex + CURSOR_MARKER.length);
-			markerIndex = stripped.indexOf(CURSOR_MARKER, markerIndex);
-		}
-		this.#composedFrame.push(stripped);
+		this.#composedFrame.push(this.#stripCursorMarkers(line, markerIndex));
 	}
 
 	#syncTerminalCursorMode(component: Component | null): void {
@@ -1862,6 +2018,22 @@ export class TUI extends Container {
 	 */
 	setScrollbackRebuild(enabled: boolean): void {
 		this.#scrollbackRebuildEnabled = enabled;
+	}
+
+	/**
+	 * Get how a settled in-place width resize refreshes native scrollback.
+	 */
+	getResizeScrollback(): ResizeScrollbackMode {
+		return this.#resizeScrollbackMode;
+	}
+
+	/**
+	 * Set how a settled in-place width resize refreshes native scrollback
+	 * (see {@link ResizeScrollbackMode}; engine default `preserve` — the coding
+	 * agent applies its `tui.resizeScrollback` setting, default `append`).
+	 */
+	setResizeScrollback(mode: ResizeScrollbackMode): void {
+		this.#resizeScrollbackMode = mode;
 	}
 
 	getShowHardwareCursor(): boolean {
@@ -2142,19 +2314,21 @@ export class TUI extends Container {
 	}
 
 	#querySixelSupport(): void {
+		// A statically known protocol (Kitty/iTerm2 terminals) or an explicit
+		// PI_FORCE_IMAGE_PROTOCOL choice — including its `off` kill switch — wins
+		// over the probe.
 		if (TERMINAL.imageProtocol) return;
-		// win32 native or WSL under Windows Terminal — both are ConPTY-hosted and
-		// reach the same WT graphics negotiation. WSL reports process.platform
-		// "linux", so a bare win32 check silently skips the probe there (#6009).
-		if (!isConPTYHosted()) return;
-		if (!Bun.env.WT_SESSION) return;
+		if (isImageProtocolForced()) return;
 		if (!process.stdin.isTTY || !process.stdout.isTTY) return;
 
 		this.#clearSixelProbeState();
-		this.#sixelProbePendingDa = true;
 		this.#sixelProbePendingGraphics = true;
 		this.#sixelProbeUnsubscribe = this.addInputListener(data => this.#handleSixelProbeInput(data));
-		this.terminal.write("\x1b[c");
+		// XTSMGRAPHICS item 2 reports the terminal's maximum SIXEL geometry. DA1
+		// attribute 4 advertises SIXEL as well, but ProcessTerminal swallows every
+		// `CSI ? … c` reply for the whole session so a late one cannot leak into the
+		// composer (#8542): those bytes never reach an input listener, so this probe
+		// cannot read them.
 		this.terminal.write("\x1b[?2;1;0S");
 		this.#sixelProbeTimeout = setTimeout(() => {
 			this.#finishSixelProbe(false);
@@ -2162,7 +2336,7 @@ export class TUI extends Container {
 	}
 
 	#handleSixelProbeInput(data: string): InputListenerResult {
-		if (!this.#sixelProbePendingDa && !this.#sixelProbePendingGraphics) {
+		if (!this.#sixelProbePendingGraphics) {
 			return undefined;
 		}
 
@@ -2171,47 +2345,24 @@ export class TUI extends Container {
 		let probeOutcome: boolean | null = null;
 
 		while (this.#sixelProbeBuffer.length > 0) {
-			const daMatch = this.#sixelProbeBuffer.match(/\x1b\[\?([0-9;]+)c/u);
 			const graphicsMatch = this.#sixelProbeBuffer.match(/\x1b\[\?2;(\d+);([0-9;]+)S/u);
+			if (!graphicsMatch || graphicsMatch.index === undefined) break;
 
-			if (!daMatch && !graphicsMatch) break;
+			passthrough += this.#sixelProbeBuffer.slice(0, graphicsMatch.index);
+			this.#sixelProbeBuffer = this.#sixelProbeBuffer.slice(graphicsMatch.index + graphicsMatch[0].length);
 
-			const daIndex = daMatch?.index ?? Number.POSITIVE_INFINITY;
-			const graphicsIndex = graphicsMatch?.index ?? Number.POSITIVE_INFINITY;
-			const useDa = daIndex <= graphicsIndex;
-			const match = useDa ? daMatch : graphicsMatch;
-			if (!match || match.index === undefined) break;
-
-			passthrough += this.#sixelProbeBuffer.slice(0, match.index);
-			this.#sixelProbeBuffer = this.#sixelProbeBuffer.slice(match.index + match[0].length);
-
-			if (useDa && this.#sixelProbePendingDa) {
-				this.#sixelProbePendingDa = false;
-				const attributes = (match[1] ?? "")
-					.split(";")
-					.map(value => Number.parseInt(value, 10))
-					.filter(value => Number.isFinite(value));
-				const hasSixelAttribute = attributes.includes(4);
-				if (hasSixelAttribute) {
-					this.#sixelProbePendingGraphics = false;
-					probeOutcome = true;
-				} else if (!this.#sixelProbePendingGraphics) {
-					probeOutcome = false;
-				}
-			} else if (!useDa && this.#sixelProbePendingGraphics) {
+			if (this.#sixelProbePendingGraphics) {
 				this.#sixelProbePendingGraphics = false;
-				const status = Number.parseInt(match[1] ?? "", 10);
-				const supportsSixel = !Number.isNaN(status) && status !== 0;
-				if (supportsSixel) {
-					this.#sixelProbePendingDa = false;
-					probeOutcome = true;
-				} else if (!this.#sixelProbePendingDa) {
-					probeOutcome = false;
-				}
+				// Reply shape `CSI ? 2 ; Ps ; Pv S`: per xterm ctlseqs Ps is the status
+				// (0 = success, 1..3 = error/failure) and Pv the maximum SIXEL geometry,
+				// which a terminal without SIXEL reports as zero.
+				const status = Number.parseInt(graphicsMatch[1] ?? "", 10);
+				const hasGeometry = (graphicsMatch[2] ?? "").split(";").some(part => Number.parseInt(part, 10) > 0);
+				probeOutcome = status === 0 && hasGeometry;
 			}
 		}
 
-		if (this.#sixelProbePendingDa || this.#sixelProbePendingGraphics) {
+		if (this.#sixelProbePendingGraphics) {
 			const partialStart = this.#getSixelProbePartialStart(this.#sixelProbeBuffer);
 			if (partialStart >= 0) {
 				passthrough += this.#sixelProbeBuffer.slice(0, partialStart);
@@ -2255,7 +2406,6 @@ export class TUI extends Container {
 			this.#sixelProbeUnsubscribe();
 			this.#sixelProbeUnsubscribe = undefined;
 		}
-		this.#sixelProbePendingDa = false;
 		this.#sixelProbePendingGraphics = false;
 		this.#sixelProbeBuffer = "";
 	}
@@ -2558,12 +2708,6 @@ export class TUI extends Container {
 			this.requestComponentRender(component);
 			return;
 		}
-		for (const line of nextLines) {
-			if (line.includes(CURSOR_MARKER)) {
-				this.requestComponentRender(component);
-				return;
-			}
-		}
 
 		let firstChanged = -1;
 		let lastChanged = -1;
@@ -2571,8 +2715,9 @@ export class TUI extends Container {
 		for (let i = 0; i < nextLines.length; i++) {
 			const frameRow = segment.start + i;
 			const raw = nextLines[i]!;
-			const prepared = this.#prepareLine(raw, width);
-			this.#composedFrame[frameRow] = raw;
+			const composed = this.#stripCursorMarkers(raw);
+			const prepared = this.#prepareLine(composed, width);
+			this.#composedFrame[frameRow] = composed;
 			this.#preparedMeta[frameRow] = prepared;
 			this.#preparedFrame[frameRow] = prepared.line;
 			if (previousWindow[screenStart + i] === prepared.line) continue;
@@ -2580,7 +2725,8 @@ export class TUI extends Container {
 			if (firstChanged === -1) firstChanged = i;
 			lastChanged = i;
 		}
-		segments[segmentIndex] = { ...segment, lines: nextLines };
+		this.#replaceFrameCursorMarkers(segment.start, nextLines);
+		segment.lines = nextLines;
 		this.#preparedValidRows = Math.max(this.#preparedValidRows, segment.start + nextLines.length);
 		this.#renderStablePrefixRows = Math.min(this.#renderStablePrefixRows, segment.start);
 
@@ -3497,6 +3643,11 @@ export class TUI extends Container {
 		// reports no seam (shell semantics).
 		const frameLength = rawFrame.length;
 		const finalBoundary = Math.max(0, Math.min(frameLength, liveRegionStart ?? frameLength));
+		// No commit may cross into a pinned region, even one below an unpinned
+		// topmost seam (an anchored HUD/panel under a streaming transcript). The
+		// topmost seam still governs exactness (finalBoundary); this ceiling only
+		// bars a growing pinned region's scrolled-off rows from native scrollback.
+		const commitCeiling = this.#nativeScrollbackPinnedBoundary ?? frameLength;
 
 		// 2. Transition state captured before any emitter runs.
 		let prevWindowTop = this.#windowTopRow;
@@ -3674,6 +3825,13 @@ export class TUI extends Container {
 		if (widthEpochReset && hasVisibleOverlay && this.#widthEpochOverlayBoundary === undefined) {
 			this.#widthEpochOverlayBoundary = capturedWidthEpochBoundary;
 		}
+		// A width epoch settled while an overlay covered the transcript: the
+		// scrollback refresh cannot run now (overlays freeze commits), and no
+		// second width resize may ever come. Latch it and consume it on the
+		// first uncovered authoritative normal-screen render.
+		if (widthEpochReset && hasVisibleOverlay && this.#resizeScrollbackMode !== "preserve") {
+			this.#resizeScrollbackReplayPending = true;
+		}
 		const replayUnresolvedOverlayFrame = widthEpochReset && this.#widthEpochOverlayReplayPending;
 		const replayUnresolvedWidthEpoch =
 			replayUnresolvedOverlayFrame ||
@@ -3707,7 +3865,52 @@ export class TUI extends Container {
 			!geometryChanged &&
 			!isMultiplexerSession() &&
 			(committedRowsResynced || frameLength <= this.#committedRows);
-		const fullPaint = firstPaint || replaceRequested || geometryRebuild || divergenceRebuild;
+		// A settled in-place width resize left native history wrapped at the old
+		// width (the host rewraps its own scrollback; long lines stay shredded at
+		// the old boundaries). Unless the mode is `preserve`, refresh it with one
+		// full paint of the recomposed current-width frame: `append` leaves the
+		// old-wrap copy above (one fresh copy per settled resize, never loss);
+		// `rebuild` clears native history first so it holds the transcript
+		// exactly once. Epochs settled under a visible overlay keep the deferred
+		// bounded path for that frame and consume the latched refresh here once
+		// the overlay closes.
+		const resizeScrollbackReplay =
+			(widthEpochReset || this.#resizeScrollbackReplayPending) &&
+			!hasVisibleOverlay &&
+			this.#resizeScrollbackMode !== "preserve";
+		const fullPaint =
+			firstPaint || replaceRequested || geometryRebuild || divergenceRebuild || resizeScrollbackReplay;
+		// Height-only mux resizes move rows between the pane's scrollback and its
+		// grid. A shrink with a full grid pushes the grid-top rows into pane
+		// scrollback without a commit; a grow pulls the scrollback tail back into
+		// the grid, where the forced in-place window rewrite overwrites it — gone
+		// from history. The scrollback is a stack: pushed rows sit at the tail
+		// only until the next commit buries them, so they shield a pull only
+		// while the commit seam has not moved since the push. The unshielded
+		// remainder removes committed rows — drop the commit seam by it and let
+		// the next chunk re-commit them. A short frame gains blank rows instead
+		// of pulling.
+		if (fullPaint || widthChanged) {
+			this.#muxPushedRows = 0;
+		} else if (
+			geometryChanged &&
+			this.#previousHeight > 0 &&
+			this.#previousFrameLength - this.#windowTopRow >= this.#previousHeight
+		) {
+			if (this.#committedRows !== this.#muxPushSeam) this.#muxPushedRows = 0;
+			if (height < this.#previousHeight) {
+				this.#muxPushedRows += this.#previousHeight - height;
+				this.#muxPushSeam = this.#committedRows;
+			} else if (height > this.#previousHeight) {
+				const pull = height - this.#previousHeight;
+				const fromPushed = Math.min(pull, this.#muxPushedRows);
+				this.#muxPushedRows -= fromPushed;
+				const fromCommitted = Math.min(pull - fromPushed, this.#committedRows);
+				this.#committedRows -= fromCommitted;
+				this.#committedPrefix.length = this.#committedRows;
+				this.#muxPushSeam = this.#committedRows;
+			}
+		}
 		let windowTop: number;
 		let chunkTo: number;
 		let widthEpochAppendFrom = 0;
@@ -3715,7 +3918,7 @@ export class TUI extends Container {
 		if (fullPaint) {
 			committedPrefixResliced = true;
 			windowTop = Math.max(0, frameLength - height);
-			chunkTo = liveRegionPinned ? Math.min(windowTop, finalBoundary) : windowTop;
+			chunkTo = Math.min(windowTop, commitCeiling);
 		} else if (widthEpochReset) {
 			// A terminal width change ends the physical-row coordinate epoch.
 			// Resolve the last emitted logical source boundary at the new width;
@@ -3735,7 +3938,7 @@ export class TUI extends Container {
 				hasVisibleOverlay || widthEpochCurrentRows === undefined
 					? hasVisibleOverlay
 						? widthEpochAppendFrom
-						: Math.max(widthEpochAppendFrom, liveRegionPinned ? finalBoundary : frameLength)
+						: Math.max(widthEpochAppendFrom, commitCeiling)
 					: Math.max(widthEpochAppendFrom, widthEpochCurrentRows);
 		} else if (this.#widthEpochBaselineRows !== undefined) {
 			// Only rows physically appended after the width epoch may drive the
@@ -3746,7 +3949,7 @@ export class TUI extends Container {
 			windowTop = Math.max(0, frameLength - height);
 			chunkTo = this.#committedRows;
 			widthEpochAppendFrom = this.#widthEpochBaselineRows;
-			const appendBoundary = liveRegionPinned ? finalBoundary : frameLength;
+			const appendBoundary = commitCeiling;
 			widthEpochAppendTo = hasVisibleOverlay ? widthEpochAppendFrom : Math.max(widthEpochAppendFrom, appendBoundary);
 		} else if (
 			frameLength <= this.#committedRows ||
@@ -3767,7 +3970,7 @@ export class TUI extends Container {
 			// "duplication, never loss" is the ED3-unsafe fallback contract.
 			committedPrefixResliced = true;
 			windowTop = Math.max(0, frameLength - height);
-			chunkTo = liveRegionPinned ? Math.min(windowTop, finalBoundary) : windowTop;
+			chunkTo = Math.min(windowTop, commitCeiling);
 			this.#committedRows = chunkTo;
 			this.#committedPrefix = rawFrame.slice(0, chunkTo);
 		} else if (geometryChanged && Math.max(0, frameLength - height) < this.#committedRows) {
@@ -3775,11 +3978,23 @@ export class TUI extends Container {
 			// the viewport. Rebase the commit seam to that exposed frame tail before
 			// the forced rewrite; flooring at the old seam would paint only the live
 			// suffix followed by blanks, then preserve that gap on every stream tick.
-			committedPrefixResliced = true;
 			windowTop = Math.max(0, frameLength - height);
 			chunkTo = windowTop;
 			this.#committedRows = windowTop;
-			this.#committedPrefix = rawFrame.slice(0, windowTop);
+			if (widthChanged) {
+				// A rewrap invalidated the recorded bytes: re-base the audit prefix
+				// at the new width so the accepted wrap drift does not read as a
+				// violation on the next ordinary frame.
+				committedPrefixResliced = true;
+				this.#committedPrefix = rawFrame.slice(0, windowTop);
+			} else {
+				// Height-only reflow: the pane did not rewrap, so the recorded
+				// bytes are still the true tape record. Truncate instead of
+				// reslicing from the current frame — replacing the record with
+				// live content would bless drifted frozen snapshots as verified
+				// and skip their finalize-time recommit (rows lost from history).
+				this.#committedPrefix.length = Math.min(this.#committedPrefix.length, windowTop);
+			}
 		} else {
 			// Re-anchor to the frame tail, floored at the committed boundary: a
 			// shrink (or overlay close) pulls the window back down, but never
@@ -3792,17 +4007,15 @@ export class TUI extends Container {
 			// record; nothing that was painted may vanish. Overlays freeze
 			// commits: composited rows must never enter history, and the hidden
 			// gap backfills via the chunk once the overlay closes. A multiplexer
-			// resize also commits nothing — the pane keeps its own (old-wrap)
-			// history — and re-bases the audit prefix at the new width so the
+			// resize also commits nothing — the pane keeps its own history — and
+			// a width rewrap re-bases the audit prefix at the new width so the
 			// accepted wrap drift does not read as a violation on the next
 			// ordinary frame.
 			chunkTo =
 				hasVisibleOverlay || geometryChanged
 					? this.#committedRows
-					: liveRegionPinned
-						? Math.min(windowTop, Math.max(this.#committedRows, finalBoundary))
-						: windowTop;
-			if (geometryChanged) {
+					: Math.min(windowTop, Math.max(this.#committedRows, commitCeiling));
+			if (widthChanged) {
 				committedPrefixResliced = true;
 				this.#committedPrefix = rawFrame.slice(0, this.#committedRows);
 			}
@@ -3840,7 +4053,10 @@ export class TUI extends Container {
 		const intent: RenderIntent = fullPaint
 			? {
 					kind: "fullPaint",
-					clearScrollback: divergenceRebuild || ((replaceRequested || geometryRebuild) && !isMultiplexerSession()),
+					clearScrollback:
+						divergenceRebuild ||
+						(resizeScrollbackReplay && this.#resizeScrollbackMode === "rebuild") ||
+						((replaceRequested || geometryRebuild) && !isMultiplexerSession()),
 				}
 			: { kind: "update", chunkTo, windowTop };
 		this.#logRedraw(intent, frameLength, height);
@@ -3868,7 +4084,15 @@ export class TUI extends Container {
 		// re-emission. Width epochs retain an opaque native-row ledger, so close
 		// the old placement-coordinate epoch with its captured seam on reset and
 		// use the current-width commit seam calculated below thereafter.
-		if (widthEpochReset) {
+		// An `append` scrollback replay is exactly such a reset: the old-width
+		// attach rows must not be compared against the current-width commit seam,
+		// so the coordinate epoch transitions here and the full paint re-anchors
+		// placements at current-width rows (archived cells keep their identity
+		// and advance their placement id on the next emit). Only the ED3
+		// `rebuild` replay skips this: the clear destroys every placement cell
+		// and the emitter restarts the epochs via `resetPlacementEpochs()`, same
+		// as a direct-terminal geometry rebuild.
+		if (widthEpochReset && !(intent.kind === "fullPaint" && intent.clearScrollback)) {
 			this.#imageBudget.observeCommitWatermark(placementEpochWatermark);
 			this.#imageBudget.beginPlacementCoordinateEpoch();
 		} else if (intent.kind === "fullPaint" || this.#widthEpochBaselineRows === undefined) {
@@ -3884,7 +4108,9 @@ export class TUI extends Container {
 				cursorTrackingLineCount,
 				boundConptyPaint: !unboundedConptyPaint,
 				leadingSequence: deferredAltExit,
-				copyScreenToScrollback: true,
+				// A width-epoch replay must not push the invalidated old-width
+				// viewport into native history on terminals that support it.
+				copyScreenToScrollback: !resizeScrollbackReplay,
 			});
 			this.#pendingAltExit = "";
 			this.#committedPrefix = rawFrame.slice(0, chunkTo);
@@ -3896,6 +4122,7 @@ export class TUI extends Container {
 			this.#widthEpochOverlayReplayPending = false;
 			this.#widthEpochOverlayBoundary = undefined;
 			this.#widthEpochCommittedPrefix = undefined;
+			this.#resizeScrollbackReplayPending = false;
 			this.#publishCommittedRows();
 			if (!firstPaint && frameLength > height) this.#armPostFullPaintSettle();
 			return;
@@ -3911,7 +4138,7 @@ export class TUI extends Container {
 			let commitTo: number;
 			if (replayUnresolvedWidthEpoch) {
 				commitFrom = 0;
-				commitTo = liveRegionPinned ? Math.min(windowTop, finalBoundary) : windowTop;
+				commitTo = Math.min(windowTop, commitCeiling);
 				scrollRows = commitTo;
 			} else if (logicalAppend && !logicalPrefixAppend) {
 				const sourceWindowTop = Math.max(0, widthEpochSourceBoundary - height);
