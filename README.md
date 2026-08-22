@@ -75,6 +75,22 @@ remote-execution protocol), re-implemented as in-tree OMP features:
 5. **Audit** — every HTTP interaction lands in `<out>/http.log`; bodies in
    `<out>/responses/`; all state survives compaction (files are the memory).
 
+**Required engagement setup (first condition — `/pentest` does not run
+without these):**
+
+- **Bolt** — at least one paired server: `omp config set
+  bolt.servers.<name>.url <url>` then the `bolt` tool `pair <name> <url>
+  <adminToken>` (the prerequisite gate checks `bolt_status` shows a
+  `connected` server before any intake question).
+- **Browser relay** — `omp browser-relay install` → load the unpacked
+  extension in `chrome://extensions` (badge shows "on") → `omp config set
+  browser.relay true`. The gate probes the relay via the `browser` tool
+  (`app.relay: true`) and stops with setup instructions when it is missing.
+  The pentester drives your real logged-in Chrome through it for
+  login-walled areas and admin panels (`app.target: "<tab substring>"` to
+  adopt a tab on the target); scope-guarded — the user's browser is never
+  navigated off-scope and relay tabs are never closed by omp.
+
 **Optional engagement tooling (merged from upstream):**
 
 - **SSH staging** — `read`/`grep`/`write` accept `ssh://<host>/<path>` for
@@ -89,13 +105,6 @@ remote-execution protocol), re-implemented as in-tree OMP features:
   a backend on, the pentester persists phase state (findings, endpoints,
   creds inventory, do-not-touch) via `retain` and resumes later engagements
   on the same target via `reflect` (`/memory stats` for status).
-- **Relay browsing (authenticated areas)** — `omp browser-relay install` +
-  `omp config set browser.relay true` lets the pentester drive your real
-  logged-in Chrome via the `browser` tool (`app.relay: true`,
-  `app.target: "<tab substring>"` to adopt a tab on the target) — for
-  login-walled pages and admin panels the headless crawler cannot reach.
-  Scope-guarded: the user's real browser is never navigated off-scope and
-  relay tabs are never closed by omp.
 
 ## Skill authoring & validation
 
