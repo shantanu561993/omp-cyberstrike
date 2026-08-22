@@ -341,7 +341,7 @@ function systemChromiumCandidates(
 	return candidates;
 }
 
-async function resolveSystemChromium(): Promise<string | undefined> {
+export async function resolveSystemChromium(): Promise<string | undefined> {
 	if (resolvedChromium !== undefined) return resolvedChromium ?? undefined;
 	const seen = new Set<string>();
 	for (const candidate of systemChromiumCandidates()) {

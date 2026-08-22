@@ -82,14 +82,18 @@ without these):**
   bolt.servers.<name>.url <url>` then the `bolt` tool `pair <name> <url>
   <adminToken>` (the prerequisite gate checks `bolt_status` shows a
   `connected` server before any intake question).
-- **Browser relay** — `omp browser-relay install` → load the unpacked
-  extension in `chrome://extensions` (badge shows "on") → `omp config set
-  browser.relay true`. The gate probes the relay via the `browser` tool
-  (`app.relay: true`) and stops with setup instructions when it is missing.
-  The pentester drives your real logged-in Chrome through it for
-  login-walled areas and admin panels (`app.target: "<tab substring>"` to
-  adopt a tab on the target); scope-guarded — the user's browser is never
-  navigated off-scope and relay tabs are never closed by omp.
+- **Browser relay** — automatic: the gate launches the fork's built-in
+  Chromium (the crawler's playwright chromium-1208) with the relay extension
+  pre-loaded when nothing is connected, so the only requirements are the
+  browser deps (dev container / release sidecar) and a display (Linux
+  headless: xvfb). The pentester drives it through the `browser` tool
+  (`app.relay: true`, `app.target: "<tab substring>"` to adopt a tab) for
+  login-walled areas and admin panels; the managed browser keeps a
+  persistent profile (`~/.omp/browser-relay/profile`) so sign-ins survive
+  across engagements. Optional: your own Chrome with the extension installed
+  (`omp browser-relay install` → load unpacked → `browser.relay true`) is
+  adopted instead when connected. Scope-guarded — never navigated off-scope,
+  relay tabs are never closed by omp.
 
 **Optional engagement tooling (merged from upstream):**
 

@@ -4,14 +4,8 @@
  * intentional user-facing output.
  */
 import * as path from "node:path";
-import { getBrowserRelayDir } from "@oh-my-pi/pi-utils";
 import { probeRelayServer } from "../tools/browser/relay/daemon";
-import backgroundJs from "../tools/browser/relay/extension-assets/background.js.txt" with { type: "text" };
-import licenseText from "../tools/browser/relay/extension-assets/LICENSE.txt" with { type: "text" };
-import manifestJson from "../tools/browser/relay/extension-assets/manifest.json.txt" with { type: "text" };
-import optionsHtml from "../tools/browser/relay/extension-assets/options.html.txt" with { type: "text" };
-import optionsJs from "../tools/browser/relay/extension-assets/options.js.txt" with { type: "text" };
-import thirdPartyNotices from "../tools/browser/relay/extension-assets/THIRD-PARTY-NOTICES.txt" with { type: "text" };
+import { relayExtensionDir, writeRelayExtension } from "../tools/browser/relay/extension";
 import { DEFAULT_RELAY_URL } from "../tools/browser/relay/kind";
 import { type RelayServer, startRelayServer } from "../tools/browser/relay/server";
 
@@ -29,15 +23,6 @@ export interface BrowserRelayCommandArgs {
 	verbose?: boolean;
 }
 
-const EXTENSION_FILES: Record<string, string> = {
-	"background.js": backgroundJs,
-	LICENSE: licenseText,
-	"manifest.json": manifestJson,
-	"options.html": optionsHtml,
-	"options.js": optionsJs,
-	"THIRD-PARTY-NOTICES.txt": thirdPartyNotices,
-};
-
 /** Default port of the relay endpoint (kept in sync with DEFAULT_RELAY_URL). */
 export const DEFAULT_RELAY_PORT = Number(new URL(DEFAULT_RELAY_URL).port);
 
@@ -50,10 +35,8 @@ export async function runBrowserRelayCommand(args: BrowserRelayCommandArgs): Pro
 }
 
 async function runInstall(dirOverride: string | undefined): Promise<void> {
-	const dir = dirOverride ? path.resolve(dirOverride) : path.join(getBrowserRelayDir(), "extension");
-	for (const name in EXTENSION_FILES) {
-		await Bun.write(path.join(dir, name), EXTENSION_FILES[name]!);
-	}
+	const dir = dirOverride ? path.resolve(dirOverride) : relayExtensionDir();
+	writeRelayExtension(dir);
 	console.log(`Installed the OMP Browser Relay extension to ${dir}`);
 	console.log("");
 	console.log("Finish setup in Chrome:");
