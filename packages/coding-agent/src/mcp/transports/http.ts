@@ -90,7 +90,16 @@ export class HttpTransport implements MCPTransport {
 	/** Called on 401/403 to attempt token refresh. Returns updated headers or null. */
 	onAuthError?: () => Promise<Record<string, string> | null>;
 
-	constructor(private config: MCPHttpServerConfig | MCPSseServerConfig) {}
+	constructor(
+		private config: MCPHttpServerConfig | MCPSseServerConfig,
+		/**
+		 * Per-request header generator (e.g. request signing). Called for every
+		 * fetch (POST/GET/DELETE) with the exact init; the returned headers are
+		 * merged over the transport's own generated headers and still pass
+		 * through the header-policy merge with the configured ones.
+		 */
+		private readonly generateRequestHeaders?: (init: MCPFetchInit) => Record<string, string>,
+	) {}
 
 	/**
 	 * Fetch the configured endpoint with header precedence and origin policy.
@@ -103,8 +112,11 @@ export class HttpTransport implements MCPTransport {
 	 */
 	#fetch(init: MCPFetchInit, generated: Record<string, string>): Promise<Response> {
 		const configured = withoutHeader(this.config.headers, "MCP-Protocol-Version");
+		const extra = this.generateRequestHeaders?.(init) ?? {};
 		const withVersion =
-			this.#protocolVersion === null ? generated : { "MCP-Protocol-Version": this.#protocolVersion, ...generated };
+			this.#protocolVersion === null
+				? { ...generated, ...extra }
+				: { "MCP-Protocol-Version": this.#protocolVersion, ...generated, ...extra };
 		return mcpFetch(
 			this.config.url,
 			init,

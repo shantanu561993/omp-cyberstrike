@@ -17,10 +17,10 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getAgentDir, logger } from "@oh-my-pi/pi-utils";
-import type { MCPRequestOptions, MCPTransport } from "./types";
+import type { MCPFetchInit } from "./transports/header-policy";
+import { HttpTransport } from "./transports/http";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
-const MAX_JSON_RPC_RESPONSE_BYTES = 16 * 1024 * 1024;
 
 export interface BoltCredentials {
 	clientId: string;
@@ -195,117 +195,31 @@ export class BoltNotPairedError extends Error {
 }
 
 /**
- * Signed JSON-RPC transport over HTTP for Bolt servers (implements the
- * duck-typed MCPTransport contract — see mcp/types.ts).
+ * Signed JSON-RPC transport over HTTP for Bolt servers.
+ *
+ * Rides the shared streamable-HTTP transport (`mcp/transports/http.ts`): MCP
+ * session affinity, SSE response handling, server-to-client requests,
+ * timeouts, and DELETE session termination come from upstream. The only
+ * bolt-specific part is the per-request Ed25519 signature, injected through
+ * the transport's request-header hook.
  */
-export class BoltTransport implements MCPTransport {
-	readonly connected = true;
-	onClose?: () => void;
-	onError?: (error: Error) => void;
-	onNotification?: (method: string, params: unknown) => void;
-	onRequest?: (method: string, params: unknown) => Promise<unknown>;
-
-	private idCounter = 1;
-	/** MCP streamable-HTTP session affinity: the server issues an Mcp-Session-Id in the
-	 * initialize response and requires it on every subsequent request. */
-	private sessionId: string | undefined;
-
-	constructor(
-		private readonly creds: BoltCredentials,
-		private readonly config: BoltTransportConfig,
-	) {}
-
-	private async signedRequest<T>(method: string, params: Record<string, unknown>, id?: number): Promise<T> {
-		const url = new URL("/mcp", this.config.url.replace(/\/+$/, ""));
-		const body = JSON.stringify({
-			jsonrpc: "2.0",
-			id: id ?? this.idCounter++,
-			method,
-			params,
-		});
-		const headers = signRequest(this.creds, "POST", url.pathname + url.search, body);
-		const res = await fetch(url, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Accept: "application/json, text/event-stream",
-				...(this.sessionId ? { "Mcp-Session-Id": this.sessionId } : {}),
-				...headers,
-			},
-			body,
-			signal: AbortSignal.timeout(this.config.timeout ?? DEFAULT_TIMEOUT_MS),
-		});
-		// Session affinity: remember the server-issued session id (initialize response).
-		const issuedSession = res.headers.get("mcp-session-id");
-		if (issuedSession) this.sessionId = issuedSession;
-		if (!res.ok) {
-			const text = await res.text().catch(() => "");
-			throw new Error(`bolt ${this.config.url} responded ${res.status}: ${text.slice(0, 500)}`);
-		}
-		const contentType = res.headers.get("content-type") ?? "";
-		let text: string;
-		if (contentType.includes("text/event-stream")) {
-			const raw = await res.text();
-			const dataLine = raw
-				.split(/\r?\n/)
-				.find(l => l.startsWith("data:"))
-				?.slice(5)
-				.trim();
-			if (!dataLine) throw new Error(`bolt ${this.config.url}: empty SSE payload`);
-			text = dataLine;
-		} else {
-			const buf = Buffer.from(await res.arrayBuffer());
-			if (buf.byteLength > MAX_JSON_RPC_RESPONSE_BYTES) {
-				throw new Error(`bolt ${this.config.url}: response exceeds ${MAX_JSON_RPC_RESPONSE_BYTES} bytes`);
-			}
-			text = buf.toString("utf8");
-		}
-		const parsed = JSON.parse(text) as { result?: T; error?: { code: number; message: string } };
-		if (parsed.error) {
-			throw new Error(`bolt ${method} error ${parsed.error.code}: ${parsed.error.message}`);
-		}
-		return parsed.result as T;
-	}
-
-	async request<T = unknown>(
-		method: string,
-		params?: Record<string, unknown>,
-		options?: MCPRequestOptions,
-	): Promise<T> {
-		if (options?.signal?.aborted)
-			throw options.signal.reason instanceof Error ? options.signal.reason : new Error("Aborted");
-		return this.signedRequest<T>(method, params ?? {}, undefined);
-	}
-
-	async notify(method: string, params?: Record<string, unknown>): Promise<void> {
-		// Notifications have no id — the mock/real servers ignore the response.
-		const url = new URL("/mcp", this.config.url.replace(/\/+$/, ""));
-		const body = JSON.stringify({ jsonrpc: "2.0", method, params: params ?? {} });
-		const headers = signRequest(this.creds, "POST", url.pathname + url.search, body);
-		await fetch(url, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				...(this.sessionId ? { "Mcp-Session-Id": this.sessionId } : {}),
-				...headers,
-			},
-			body,
-			signal: AbortSignal.timeout(this.config.timeout ?? DEFAULT_TIMEOUT_MS),
-		}).catch(() => {});
-	}
-
-	async close(): Promise<void> {
-		// Stateless HTTP transport — nothing to tear down.
-	}
-
-	setProtocolVersion(_version: string): void {
-		// Bolt's JSON-RPC surface is version-agnostic.
+export class BoltTransport extends HttpTransport {
+	constructor(creds: BoltCredentials, config: BoltTransportConfig) {
+		// Preserve the absolute-path `/mcp` endpoint the CyberStrike server
+		// expects: an origin-prefixed base URL still targets `/mcp` at the
+		// origin root, and the signature covers exactly the path requested.
+		const url = new URL("/mcp", config.url.replace(/\/+$/, "")).href;
+		super({ type: "http", url, timeout: config.timeout }, (init: MCPFetchInit) =>
+			signRequest(creds, init.method, new URL(url).pathname + new URL(url).search, init.body ?? ""),
+		);
 	}
 }
 
-/** Build a BoltTransport from a server URL; throws BoltNotPairedError when unpaired. */
-export function createBoltTransport(config: BoltTransportConfig): BoltTransport {
+/** Build a connected BoltTransport from a server URL; throws BoltNotPairedError when unpaired. */
+export async function createBoltTransport(config: BoltTransportConfig): Promise<BoltTransport> {
 	const found = findBoltCredentialsByUrl(config.url);
 	if (!found) throw new BoltNotPairedError(config.url);
-	return new BoltTransport(found.creds, config);
+	const transport = new BoltTransport(found.creds, config);
+	await transport.connect();
+	return transport;
 }

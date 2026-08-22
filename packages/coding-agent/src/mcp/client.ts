@@ -86,7 +86,7 @@ async function createTransport(config: MCPServerConfig): Promise<MCPTransport> {
 			// Unpaired servers throw BoltNotPairedError — the manager records a
 			// failed connection and the server contributes no tools until the
 			// `bolt` tool pairs it.
-			return createBoltTransport(config as MCPBoltServerConfig);
+			return await createBoltTransport(config as MCPBoltServerConfig);
 		default:
 			throw new Error(`Unknown server type: ${serverType}`);
 	}

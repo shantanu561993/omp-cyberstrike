@@ -133,7 +133,7 @@ export class BoltTool implements AgentTool<typeof boltSchema, BoltToolDetails> {
 				const entry = requireServer(servers, params.name);
 				let transport: BoltTransport | undefined;
 				try {
-					transport = createBoltTransport({ url: entry.url, timeout: entry.timeout });
+					transport = await createBoltTransport({ url: entry.url, timeout: entry.timeout });
 				} catch (err) {
 					if (err instanceof BoltNotPairedError) throw new ToolError(err.message);
 					throw err;

@@ -89,6 +89,13 @@ remote-execution protocol), re-implemented as in-tree OMP features:
   a backend on, the pentester persists phase state (findings, endpoints,
   creds inventory, do-not-touch) via `retain` and resumes later engagements
   on the same target via `reflect` (`/memory stats` for status).
+- **Relay browsing (authenticated areas)** — `omp browser-relay install` +
+  `omp config set browser.relay true` lets the pentester drive your real
+  logged-in Chrome via the `browser` tool (`app.relay: true`,
+  `app.target: "<tab substring>"` to adopt a tab on the target) — for
+  login-walled pages and admin panels the headless crawler cannot reach.
+  Scope-guarded: the user's real browser is never navigated off-scope and
+  relay tabs are never closed by omp.
 
 ## Skill authoring & validation
 
