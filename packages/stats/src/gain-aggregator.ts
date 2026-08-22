@@ -68,7 +68,7 @@ function matchesProject(cwd: string | undefined, project: string): boolean {
 export function normalizeProjectPath(p: string): string | null {
 	const clean = canonicalProjectPath(p);
 	if (TEMP_PATH_RE.test(clean)) return null;
-	if (/\/\.omp\/wt\//u.test(clean)) return null;
+	if (/\/\.omp-cyberstrike\/wt\//u.test(clean)) return null;
 
 	const worktreePatterns = [
 		/^(.+)\/\.wt\/[^/]+(?:\/.*)?$/u,

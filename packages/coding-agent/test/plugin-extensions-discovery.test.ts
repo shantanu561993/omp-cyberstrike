@@ -18,10 +18,10 @@ describe("plugin extension discovery", () => {
 	beforeEach(() => {
 		projectDir = TempDir.createSync("@pi-plugin-ext-");
 		// Redirect the whole config root to an isolated temp home so plugin discovery
-		// resolves into `<tempHome>/.omp/plugins` on every platform. Two things are needed:
+		// resolves into `<tempHome>/.omp-cyberstrike/plugins` on every platform. Two things are needed:
 		//  - mock os.homedir() so configRoot = `<tempHome>/.omp` (the previous
 		//    XDG_DATA_HOME redirect was a no-op on Windows, where these tests then wrote
-		//    into and rm'd the developer's real `~/.omp/plugins`);
+		//    into and rm'd the developer's real `~/.omp-cyberstrike/plugins`);
 		//  - clear the XDG_* vars, because on Linux/macOS the resolver prefers
 		//    `$XDG_DATA_HOME/omp` over the home config root when that dir exists, so an
 		//    XDG-migrated environment would otherwise still resolve the real plugins dir.
@@ -31,7 +31,7 @@ describe("plugin extension discovery", () => {
 			delete process.env[key];
 		}
 		spyOn(os, "homedir").mockReturnValue(tempHome);
-		setAgentDir(path.join(tempHome, ".omp", "agent"));
+		setAgentDir(path.join(tempHome, ".omp-cyberstrike", "agent"));
 
 		const pluginsDir = getPluginsDir();
 		// Safety gate: never write fixtures outside the temp home. This is the exact

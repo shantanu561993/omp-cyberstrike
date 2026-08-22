@@ -72,7 +72,7 @@ async function runScenario(scenario: string): Promise<ScenarioResult> {
 
 async function logFileNames(directory: string): Promise<string[]> {
 	return (await fs.readdir(directory))
-		.filter(name => /^omp\.\d{4}-\d{2}-\d{2}\.\d+\.log(?:\.\d+)?$/.test(name))
+		.filter(name => /^omp-cyberstrike\.\d{4}-\d{2}-\d{2}\.\d+\.log(?:\.\d+)?$/.test(name))
 		.sort();
 }
 
@@ -100,7 +100,7 @@ describe("central logger byte contract", () => {
 		expect(result.stdout).toBe("");
 		expect(result.stderr).toBe("");
 		const log = await readSingleLog(result.primaryDir);
-		expect(log.name).toBe(`omp.2026-01-01.${result.pid}.log`);
+		expect(log.name).toBe(`omp-cyberstrike.2026-01-01.${result.pid}.log`);
 		const expected = [
 			expectedLine(result.pid, "error", "level-error", { ordinal: 1 }),
 			expectedLine(result.pid, "warn", "level-warn", { ordinal: 2 }),
@@ -130,7 +130,9 @@ describe("central logger byte contract", () => {
 		].join("");
 		expect(log.text).toBe(expected);
 		expect(log.text.endsWith(os.EOL)).toBe(true);
-		expect(await fs.readFile(path.join(result.primaryDir, `.omp.${result.pid}-audit.json`), "utf8")).not.toBe("");
+		expect(
+			await fs.readFile(path.join(result.primaryDir, `.omp-cyberstrike.${result.pid}-audit.json`), "utf8"),
+		).not.toBe("");
 	});
 
 	test("treats Winston format tokens as a splat branch and omits context", async () => {
@@ -281,7 +283,7 @@ describe("DailyRotateFile option and retention contract", () => {
 		const result = await runScenario("date-retention");
 		expect(result.stdout).toBe("");
 		expect(result.stderr).toBe("");
-		const expectedNames = [2, 3, 4, 5, 6].map(day => `omp.2026-01-0${day}.${result.pid}.log`);
+		const expectedNames = [2, 3, 4, 5, 6].map(day => `omp-cyberstrike.2026-01-0${day}.${result.pid}.log`);
 		expect(await logFileNames(result.primaryDir)).toEqual(expectedNames);
 		for (const [offset, name] of expectedNames.entries()) {
 			const day = offset + 2;
@@ -291,7 +293,7 @@ describe("DailyRotateFile option and retention contract", () => {
 			);
 		}
 
-		const auditPath = path.join(result.primaryDir, `.omp.${result.pid}-audit.json`);
+		const auditPath = path.join(result.primaryDir, `.omp-cyberstrike.${result.pid}-audit.json`);
 		const audit = JSON.parse(await fs.readFile(auditPath, "utf8")) as AuditFile;
 		expect(audit.keep).toEqual({ days: false, amount: 5 });
 		expect(audit.auditLog).toBe(auditPath);
@@ -308,7 +310,7 @@ describe("DailyRotateFile option and retention contract", () => {
 		const result = await runScenario("size-rotation");
 		expect(result.stdout).toBe("");
 		expect(result.stderr).toBe("");
-		const baseName = `omp.2026-01-01.${result.pid}.log`;
+		const baseName = `omp-cyberstrike.2026-01-01.${result.pid}.log`;
 		const rotatedName = `${baseName}.1`;
 		expect(await logFileNames(result.primaryDir)).toEqual([baseName, rotatedName]);
 		const basePath = path.join(result.primaryDir, baseName);
@@ -328,7 +330,7 @@ describe("DailyRotateFile option and retention contract", () => {
 			expectedLine(result.pid, "info", "rotation-trigger"),
 		);
 		const audit = JSON.parse(
-			await fs.readFile(path.join(result.primaryDir, `.omp.${result.pid}-audit.json`), "utf8"),
+			await fs.readFile(path.join(result.primaryDir, `.omp-cyberstrike.${result.pid}-audit.json`), "utf8"),
 		) as AuditFile;
 		expect(audit.keep).toEqual({ days: false, amount: 5 });
 		expect(audit.files.map(file => path.basename(file.name))).toEqual([baseName, rotatedName]);

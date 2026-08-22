@@ -51,13 +51,13 @@ describe("document conversion cache directory", () => {
 		if (process.platform === "win32") return;
 
 		process.env.XDG_CACHE_HOME = path.join(tempRoot, "cache");
-		await fs.mkdir(path.join(process.env.XDG_CACHE_HOME, "omp"), { recursive: true });
+		await fs.mkdir(path.join(process.env.XDG_CACHE_HOME, "omp-cyberstrike"), { recursive: true });
 
 		const defaultAgentDir = path.join(os.homedir(), getConfigDirName(), "agent");
 		setAgentDir(defaultAgentDir);
 
 		expect(getDocumentConversionCacheDir()).toBe(
-			path.join(process.env.XDG_CACHE_HOME, "omp", "cache", "document-conversions"),
+			path.join(process.env.XDG_CACHE_HOME, "omp-cyberstrike", "cache", "document-conversions"),
 		);
 	});
 
@@ -154,20 +154,20 @@ describe("legacy file adoption on XDG paths", () => {
 		if (process.platform === "win32") return;
 		const xdgState = path.join(tempRoot, "xdg-state");
 		const xdgData = path.join(tempRoot, "xdg-data");
-		await fs.mkdir(path.join(xdgState, "omp"), { recursive: true });
-		await fs.mkdir(path.join(xdgData, "omp"), { recursive: true });
+		await fs.mkdir(path.join(xdgState, "omp-cyberstrike"), { recursive: true });
+		await fs.mkdir(path.join(xdgData, "omp-cyberstrike"), { recursive: true });
 		// Legacy layout: key under ~/.omp/agent, registry under ~/.omp.
-		await fs.mkdir(path.join(tempRoot, ".omp", "agent"), { recursive: true });
-		await fs.writeFile(path.join(tempRoot, ".omp", "agent", "secret-placeholder.key"), "legacy-key");
-		await fs.writeFile(path.join(tempRoot, ".omp", "marketplaces.json"), '{"legacy":true}');
+		await fs.mkdir(path.join(tempRoot, ".omp-cyberstrike", "agent"), { recursive: true });
+		await fs.writeFile(path.join(tempRoot, ".omp-cyberstrike", "agent", "secret-placeholder.key"), "legacy-key");
+		await fs.writeFile(path.join(tempRoot, ".omp-cyberstrike", "marketplaces.json"), '{"legacy":true}');
 		// The XDG registry is already populated: adoption must not overwrite it.
-		await fs.writeFile(path.join(xdgData, "omp", "marketplaces.json"), '{"xdg":true}');
+		await fs.writeFile(path.join(xdgData, "omp-cyberstrike", "marketplaces.json"), '{"xdg":true}');
 		activateTempHome({ XDG_STATE_HOME: xdgState, XDG_DATA_HOME: xdgData });
 
 		const key = getSecretPlaceholderKeyPath();
 		const registry = getMarketplacesRegistryPath();
-		expect(key).toBe(path.join(xdgState, "omp", "secret-placeholder.key"));
-		expect(registry).toBe(path.join(xdgData, "omp", "marketplaces.json"));
+		expect(key).toBe(path.join(xdgState, "omp-cyberstrike", "secret-placeholder.key"));
+		expect(registry).toBe(path.join(xdgData, "omp-cyberstrike", "marketplaces.json"));
 		expect(await fs.readFile(key, "utf8")).toBe("legacy-key");
 		expect(await fs.readFile(registry, "utf8")).toBe('{"xdg":true}');
 	});
@@ -175,7 +175,9 @@ describe("legacy file adoption on XDG paths", () => {
 	it("keeps the legacy paths canonical when XDG is inactive", async () => {
 		if (process.platform === "win32") return;
 		activateTempHome({});
-		expect(getSecretPlaceholderKeyPath()).toBe(path.join(tempRoot, ".omp", "agent", "secret-placeholder.key"));
-		expect(getMarketplacesRegistryPath()).toBe(path.join(tempRoot, ".omp", "marketplaces.json"));
+		expect(getSecretPlaceholderKeyPath()).toBe(
+			path.join(tempRoot, ".omp-cyberstrike", "agent", "secret-placeholder.key"),
+		);
+		expect(getMarketplacesRegistryPath()).toBe(path.join(tempRoot, ".omp-cyberstrike", "marketplaces.json"));
 	});
 });

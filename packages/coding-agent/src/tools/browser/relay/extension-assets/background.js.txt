@@ -1,5 +1,5 @@
 // extension/background.ts
-var DEFAULT_PORT = 9224;
+var DEFAULT_PORT = 9324;
 var PING_INTERVAL_MS = 20000;
 var RECONNECT_MIN_MS = 1000;
 var RECONNECT_MAX_MS = 1e4;

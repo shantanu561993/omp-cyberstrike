@@ -4440,7 +4440,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "tools",
 			group: "Grep & Browser",
 			label: "Browser Relay URL",
-			description: "omp browser relay endpoint (default http://127.0.0.1:9224).",
+			description: "omp browser relay endpoint (default http://127.0.0.1:9324).",
 		},
 	},
 

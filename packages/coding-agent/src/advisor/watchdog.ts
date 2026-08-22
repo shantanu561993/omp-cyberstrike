@@ -1,6 +1,6 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { getAgentDir, isEnoent, logger, prompt } from "@oh-my-pi/pi-utils";
+import { getAgentDir, getConfigDirName, isEnoent, logger, prompt } from "@oh-my-pi/pi-utils";
 import { expandAtImports } from "../discovery/at-imports";
 import activeRepoWatchdogTemplate from "../prompts/advisor/active-repo-watchdog.md" with { type: "text" };
 import contextFilesTemplate from "../prompts/advisor/context-files.md" with { type: "text" };
@@ -80,7 +80,7 @@ export async function collectConfigCandidates(
 	let current = cwd;
 	while (true) {
 		for (const filename of filenames) {
-			candidates.add(path.resolve(current, ".omp", filename));
+			candidates.add(path.resolve(current, getConfigDirName(), filename));
 			candidates.add(path.resolve(current, filename));
 		}
 		if (current === (repoRoot ?? home)) break;
@@ -96,9 +96,9 @@ export async function collectConfigCandidates(
 			const parent = path.dirname(candidate);
 			const baseName = parent.split(path.sep).pop() ?? "";
 			const isUser = userPaths.has(candidate);
-			const ownerDir = baseName === ".omp" ? path.dirname(parent) : parent;
+			const ownerDir = baseName === getConfigDirName() ? path.dirname(parent) : parent;
 			const ownerBaseName = ownerDir.split(path.sep).pop() ?? "";
-			if (isUser || !ownerBaseName.startsWith(".") || baseName === ".omp") {
+			if (isUser || !ownerBaseName.startsWith(".") || baseName === getConfigDirName()) {
 				const relative = path.relative(cwd, ownerDir);
 				const depth = relative === "" ? 0 : relative.split(path.sep).filter(Boolean).length;
 				items.push({ path: candidate, content, level: isUser ? "user" : "project", depth });

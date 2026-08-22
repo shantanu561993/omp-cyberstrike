@@ -198,9 +198,12 @@ describe("structured subagent primitive", () => {
 		} as ToolSession;
 
 		try {
-			await Bun.write(path.join(projectDir, ".omp", "config.yml"), "modelRoles:\n  hot_worker: kimi-code/k3:max\n");
 			await Bun.write(
-				path.join(projectDir, ".omp", "agents", "hot-worker.md"),
+				path.join(projectDir, ".omp-cyberstrike", "config.yml"),
+				"modelRoles:\n  hot_worker: kimi-code/k3:max\n",
+			);
+			await Bun.write(
+				path.join(projectDir, ".omp-cyberstrike", "agents", "hot-worker.md"),
 				'---\nname: hot-worker\ndescription: Newly added worker.\nmodel: "@hot_worker"\n---\n\nInspect the assignment.\n',
 			);
 

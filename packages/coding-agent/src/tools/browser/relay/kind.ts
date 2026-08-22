@@ -15,7 +15,7 @@ export interface RelayKind {
 }
 
 /** Default endpoint of the `omp-browser-relay` CLI. */
-export const DEFAULT_RELAY_URL = "http://127.0.0.1:9224";
+export const DEFAULT_RELAY_URL = "http://127.0.0.1:9324";
 
 export interface ResolveRelayKindOptions {
 	/** `browser.relay` setting; `PI_BROWSER_RELAY=0|1` overrides it. */

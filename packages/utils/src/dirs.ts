@@ -1,14 +1,20 @@
 /**
- * Centralized path helpers for omp config directories.
+ * Centralized path helpers for omp-cyberstrike config directories.
  *
- * Uses PI_CONFIG_DIR (default ".omp") for the config root and
+ * The fork keeps every directory distinct from upstream omp: the config root
+ * defaults to `~/.omp-cyberstrike` (project dirs: `.omp-cyberstrike`) and XDG
+ * folders use the `omp-cyberstrike` app name, so both tools can coexist on
+ * one machine without sharing state, settings, credentials, or logs.
+ *
+ * Uses PI_CONFIG_DIR (default ".omp-cyberstrike") for the config root and
  * PI_CODING_AGENT_DIR to override the agent directory.
  *
  * On Linux, if XDG_DATA_HOME / XDG_STATE_HOME / XDG_CACHE_HOME environment
  * variables are set, paths are redirected to XDG-compliant locations under
- * $XDG_*_HOME/omp/. This requires running `omp config migrate` first to
- * move data to the new locations. No filesystem existence checks are performed
- * — if the env var is set, omp trusts that the migration has been done.
+ * $XDG_*_HOME/omp-cyberstrike/. This requires running `omp config migrate`
+ * first to move data to the new locations. No filesystem existence checks are
+ * performed — if the env var is set, omp trusts that the migration has been
+ * done.
  */
 
 import * as fs from "node:fs";
@@ -16,11 +22,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { engines, version } from "../package.json" with { type: "json" };
 
-/** App name (e.g. "omp") */
-export const APP_NAME: string = "omp";
+/** App name (e.g. "omp-cyberstrike") */
+export const APP_NAME: string = "omp-cyberstrike";
 
-/** Config directory name (e.g. ".omp") */
-export const CONFIG_DIR_NAME: string = ".omp";
+/** Config directory name (e.g. ".omp-cyberstrike") */
+export const CONFIG_DIR_NAME: string = ".omp-cyberstrike";
 
 /** Ordered main settings filenames: canonical write target first, legacy-compatible YAML fallback second. */
 export const MAIN_CONFIG_FILENAMES = ["config.yml", "config.yaml"] as const;
@@ -205,12 +211,12 @@ export async function directoryExists(dir: string): Promise<boolean> {
 	}
 }
 
-/** Get the config directory name relative to home (e.g. ".omp" or PI_CONFIG_DIR override). */
+/** Get the config directory name relative to home (e.g. ".omp-cyberstrike" or PI_CONFIG_DIR override). */
 export function getConfigDirName(): string {
 	return process.env.PI_CONFIG_DIR || CONFIG_DIR_NAME;
 }
 
-/** Get the config agent directory name relative to home (e.g. ".omp/agent" or PI_CONFIG_DIR + "/agent"). */
+/** Get the config agent directory name relative to home (e.g. ".omp-cyberstrike/agent" or PI_CONFIG_DIR + "/agent"). */
 export function getConfigAgentDirName(): string {
 	const profile = getActiveProfile();
 	return profile ? path.join(getConfigDirName(), "profiles", profile, "agent") : `${getConfigDirName()}/agent`;

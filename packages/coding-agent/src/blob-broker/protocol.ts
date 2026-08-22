@@ -23,7 +23,7 @@ export const BLOB_BROKER_SOCKET_ENV = "OMP_BLOB_BROKER_SOCKET";
 export const BLOB_BROKER_CONFIG_ENV = "OMP_BLOB_BROKER_CONFIG";
 
 /** Stable broker daemon name for the shared blob broker. */
-export const BLOB_BROKER_DAEMON_NAME = "omp.blob.broker";
+export const BLOB_BROKER_DAEMON_NAME = "omp-cyberstrike.blob.broker";
 
 /** Broker readiness regex matched against the banner printed by the worker. */
 export const BLOB_BROKER_READY_PATTERN = String.raw`omp blob broker serving \S+`;

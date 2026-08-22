@@ -89,7 +89,7 @@ without these):**
   headless: xvfb). The pentester drives it through the `browser` tool
   (`app.relay: true`, `app.target: "<tab substring>"` to adopt a tab) for
   login-walled areas and admin panels; the managed browser keeps a
-  persistent profile (`~/.omp/browser-relay/profile`) so sign-ins survive
+  persistent profile (`~/.omp-cyberstrike/browser-relay/profile`) so sign-ins survive
   across engagements. Optional: your own Chrome with the extension installed
   (`omp browser-relay install` → load unpacked → `browser.relay true`) is
   adopted instead when connected. Scope-guarded — never navigated off-scope,
@@ -158,7 +158,7 @@ docker run --rm --network omp-pentest \
 ```
 
 Key env: `DEEPSEEK_API_KEY` (crawler + harness); the agent dir
-(`~/.omp/agent`) is container-local unless mounted; persistent artifacts go to
+(`~/.omp-cyberstrike/agent`) is container-local unless mounted; persistent artifacts go to
 `/work/verify`. `docker network create omp-pentest` once; fixtures
 (`scripts/verify/server.mjs`, `bolt-server.mjs`) run as containers on it.
 
@@ -202,7 +202,7 @@ Prebuilt binaries and their browser dependencies ship as GitHub Release assets
    `web_crawl` the binary extracts the bundle into `browser-deps/` next to
    itself — built-in extractor, no tar/unzip/installer needed.
 3. **Run it**: `./omp` (TUI) or `./omp --model <model> --api-key <key> -p "…"`.
-   Configure the model key once via the agent dir (`~/.omp/agent`, `/login`)
+   Configure the model key once via the agent dir (`~/.omp-cyberstrike/agent`, `/login`)
    or pass it per-run. Then `/pentest <url>` or `web_crawl` work out of the box.
 
 To update: re-download the two files from `releases/latest` and replace them
@@ -581,7 +581,7 @@ Ollama `local` · Ollama Cloud · LM Studio `local` · llama.cpp `local` · vLLM
 
 ### Custom OpenAI-compatible providers
 
-Define custom providers in `~/.omp/agent/models.yml`:
+Define custom providers in `~/.omp-cyberstrike/agent/models.yml`:
 
 ```yaml
 providers:
@@ -598,7 +598,7 @@ providers:
 
 Run `omp models spark` to verify discovery. Then run `omp setup` and choose the model in the default-model step, or open `/model` in a session and assign it to the `default` role.
 
-To preconfigure the default without the picker, add the selector to `~/.omp/agent/config.yml`:
+To preconfigure the default without the picker, add the selector to `~/.omp-cyberstrike/agent/config.yml`:
 
 ```yaml
 modelRoles:
@@ -607,7 +607,7 @@ modelRoles:
 
 ### Four knobs that make routing useful
 
-- **Custom providers** — Declare anything that speaks `openai-completions`, `openai-responses`, `openai-codex-responses`, `azure-openai-responses`, `anthropic-messages`, `bedrock-converse-stream`, `google-generative-ai`, `google-gemini-cli`, or `google-vertex` in `~/.omp/agent/models.yml`.
+- **Custom providers** — Declare anything that speaks `openai-completions`, `openai-responses`, `openai-codex-responses`, `azure-openai-responses`, `anthropic-messages`, `bedrock-converse-stream`, `google-generative-ai`, `google-gemini-cli`, or `google-vertex` in `~/.omp-cyberstrike/agent/models.yml`.
 - **Fallback chains** — Per-role or per-model chains under `retry.fallbackChains`. When the primary throws 429s or hits a quota wall, the next entry takes the rest of the turn — restored on cooldown.
 - **Path-scoped models** — Scope `enabledModels` and `disabledProviders` entries to a `path:` prefix to pin a different model set on one repo without touching the global config. Scoped entries cover the path and everything under it.
 - **Round-robin credentials** — Stack API keys per provider and the runtime rotates with session affinity and per-credential backoff. Useful when one key would burn its quota by lunch.

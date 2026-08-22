@@ -21,7 +21,7 @@ export const LSP_MUX_SOCKET_ENV = "OMP_LSP_MUX_SOCKET";
 export const LSP_MUX_PROJECT_DIR_ENV = "OMP_LSP_MUX_PROJECT_DIR";
 
 /** Stable broker daemon name for the shared LSP mux. */
-export const LSP_MUX_DAEMON_NAME = "omp.lsp.mux";
+export const LSP_MUX_DAEMON_NAME = "omp-cyberstrike.lsp.mux";
 
 /** Broker readiness regex matched against the banner printed by the worker. */
 export const LSP_MUX_READY_PATTERN = String.raw`omp lsp mux listening on \S+`;

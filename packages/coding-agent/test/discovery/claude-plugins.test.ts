@@ -92,7 +92,7 @@ describe("listClaudePluginRoots", () => {
 		process.env.HOME = tempDir;
 		vi.spyOn(os, "homedir").mockReturnValue(tempDir);
 		// Point the agent dir at a temp dir so user-scope discovery (native MCP
-		// config, skills, etc.) cannot read the real ~/.omp/agent profile.
+		// config, skills, etc.) cannot read the real ~/.omp-cyberstrike/agent profile.
 		setAgentDir(testAgentDir);
 	});
 
@@ -484,7 +484,7 @@ describe("listClaudePluginRoots", () => {
 			[firstHome, "first@market"],
 			[secondHome, "second@market"],
 		] as const) {
-			const pluginsDir = path.join(home, ".omp", "plugins");
+			const pluginsDir = path.join(home, ".omp-cyberstrike", "plugins");
 			await fs.mkdir(pluginsDir, { recursive: true });
 			await fs.writeFile(
 				path.join(pluginsDir, "installed_plugins.json"),
@@ -824,7 +824,7 @@ describe("listClaudePluginRoots", () => {
 	test("deduplicates a plugin alias of a directly configured MCP connection", async () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const pluginPath = path.join(tempDir, "plugins", "context7");
-		const directConfigPath = path.join(tempDir, ".omp", "mcp.json");
+		const directConfigPath = path.join(tempDir, ".omp-cyberstrike", "mcp.json");
 		const connection = {
 			type: "http",
 			url: "https://mcp.context7.example/mcp",
