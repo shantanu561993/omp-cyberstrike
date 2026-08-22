@@ -231,18 +231,6 @@ conflict-free; when the version bumps, re-materialize the pi-natives addons
 push this branch upstream** — the ported CyberStrike content is AGPL and must
 stay copy-local (see `packages/coding-agent/src/pentest/ATTRIBUTION.md` and
 `packages/hackbrowser/ATTRIBUTION.md`).
-
-**TUI test-engine hold (2026-08-22):** upstream's `kitty-vt-wasm` migration
-(`packages/tui/test/virtual-terminal.ts`, commit `561d212726`) consumes
-`kitty-vt-wasm@0.2.0`, which is not published (npm has 0.1.x, which lacks the
-sync-init API the tests require; upstream main is un-installable until it
-lands). The fork keeps the pre-migration `ghostty-web` test infra in place.
-When npm publishes 0.2.0+, re-apply upstream's migration: restore
-`kitty-vt-wasm` in the root `package.json` catalog, set tui's devDependency
-back to `"kitty-vt-wasm": "catalog:"`, and take upstream's versions of
-`docs/tui-core-renderer.md`, `packages/tui/CHANGELOG.md`, `packages/tui/README.md`,
-`packages/tui/test/{render-stress-harness,virtual-terminal}.ts`,
-`packages/coding-agent/test/streaming-preview-height.test.ts`, then `bun install`.
 OMP-authored additions (SKILL-AUTHORING.md, checker, catalog test,
 orchestration) are MIT like the rest of the repo; ported content stays
 AGPL-3.0/CC-BY-SA — see ATTRIBUTION.md for the split.
