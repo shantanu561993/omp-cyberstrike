@@ -159,6 +159,7 @@ import { parseTurnBudget } from "../modes/turn-budget";
 import { containsUltrathink, ULTRATHINK_NOTICE } from "../modes/ultrathink";
 import { computeNonMessageTokens } from "../modes/utils/context-usage";
 import { containsWorkflow, renderWorkflowNotice } from "../modes/workflow";
+import { assertPentestPrerequisites } from "../pentest/prerequisites";
 import { type PlanApprovalDetails, resolveApprovedPlan } from "../plan-mode/approved-plan";
 import { listPlanFiles, readPlanFile } from "../plan-mode/plan-files";
 import type { PlanModeState } from "../plan-mode/state";
@@ -5472,6 +5473,15 @@ export class AgentSession {
 			// Try file-based slash commands (markdown files from commands/ directories)
 			// Only if text still starts with "/" (wasn't transformed by custom command)
 			if (text.startsWith("/")) {
+				// Fork: /pentest hard prerequisite gate — the pentest does not run
+				// without a connected Bolt server and a live browser relay. The gate
+				// throws PentestPrerequisiteError with setup instructions before the
+				// command body is expanded (see src/pentest/prerequisites.ts).
+				const spaceIndex = text.indexOf(" ");
+				const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+				if (commandName === "pentest" && this.#slashCommands.some(cmd => cmd.name === commandName)) {
+					await assertPentestPrerequisites(this.settings);
+				}
 				text = expandSlashCommand(text, this.#slashCommands);
 			}
 		}
