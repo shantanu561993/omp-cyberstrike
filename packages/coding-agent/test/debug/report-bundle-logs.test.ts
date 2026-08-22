@@ -39,9 +39,9 @@ describe("report bundle logs", () => {
 		const logsDir = getLogsDir();
 		await fs.mkdir(logsDir, { recursive: true });
 		const today = new Date().toISOString().slice(0, 10);
-		const crashedName = `omp.${today}.4242.log`;
+		const crashedName = `omp-cyberstrike.${today}.4242.log`;
 		const rotatedName = `${crashedName}.1`;
-		const currentName = `omp.${today}.${process.pid}.log`;
+		const currentName = `omp-cyberstrike.${today}.${process.pid}.log`;
 		await Bun.write(path.join(logsDir, crashedName), '{"pid":4242,"message":"fatal in crashed pid"}\n');
 		await fs.utimes(path.join(logsDir, crashedName), 1, 1);
 		await Bun.write(path.join(logsDir, rotatedName), '{"pid":4242,"message":"earlier rotated crash output"}\n');
