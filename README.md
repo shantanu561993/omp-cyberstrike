@@ -103,12 +103,37 @@ without these):**
   (`{ "hosts": { "<name>": { "host": ..., "username": ..., "port": N,
   "keyPath": ... } } }`) or `~/.ssh/config` aliases; larger/binary transfer
   via `bash` + `scp`/`sftp`.
-- **Engagement memory** — `omp config set memory.backend mnemopi` enables
-  local SQLite retain/recall (searchable, no external service); `hindsight`
-  uses the Vectorize remote service, `local` the summary pipeline only. With
-  a backend on, the pentester persists phase state (findings, endpoints,
-  creds inventory, do-not-touch) via `retain` and resumes later engagements
-  on the same target via `reflect` (`/memory stats` for status).
+### Troubleshooting: `400 Requested token count exceeds the model's maximum context length`
+
+Local small-context models (SGLang, vLLM, llama.cpp, LM Studio) that report an
+exact `max_model_len` reject turns with this 400 once the conversation plus the
+reply exceed the window. The compaction threshold reserves room for the reply
+with a default that can be smaller than the output budget omp actually
+requests (`maxTokens`, typically 32768 for discovered OpenAI-compatible
+models):
+
+```
+safe input ceiling = contextWindow − maxTokens
+threshold           = contextWindow − max(16384, 15% × contextWindow)   # default
+400s occur when     input > safe input ceiling — between the ceiling and the threshold
+```
+
+Fix — set `compaction.reserveTokens` to at least the model's output budget in
+`~/.omp-cyberstrike/agent/config.yml` (or `~/.omp/config.yml`):
+
+```yaml
+compaction:
+  reserveTokens: 32768   # = the model's maxTokens / output budget
+```
+
+This does **not** reduce output (`max_completion_tokens` is unchanged) — it
+makes compaction trigger earlier so the full reply fits. Worked example for a
+131072-token window / 32768 output budget: safe input ceiling = 98,304;
+default threshold = 111,412 (too late — 400s); with the fix the threshold =
+98,304 (fires before overflow). Verify via `omp config get
+compaction.reserveTokens` or the `thresholdTokens` value in the log's
+`Auto-compaction threshold decision` line. Full reference:
+`docs/compaction.md`.
 
 ## Skill authoring & validation
 
