@@ -44,7 +44,7 @@ remote-execution protocol), re-implemented as in-tree OMP features:
 
 | Feature | Where | What it does |
 |---|---|---|
-| 143 embedded skills (142 hidden + `web-pentest` umbrella) + 143 companion payload files | `packages/coding-agent/src/pentest/skills/` | OWASP WSTG 4.2 checklist + attack playbooks, loaded on demand via `skill://` (small-context friendly: nothing auto-injected); payload lists, DB variants and test scripts live in per-skill companions (`payloads.md`, `refs.md`, `scripts/`) |
+| 144 embedded skills (143 hidden + `web-pentest` umbrella) + 143 companion payload files | `packages/coding-agent/src/pentest/skills/` | OWASP WSTG 4.2 checklist + attack playbooks, loaded on demand via `skill://` (small-context friendly: nothing auto-injected); payload lists, DB variants and test scripts live in per-skill companions (`payloads.md`, `refs.md`, `scripts/`) |
 | Skill authoring contract + validation | `skills/web-pentest/SKILL-AUTHORING.md` · `scripts/check-pentest-skills.ts` · `test/pentest/skills-catalog.test.ts` | canonical rules (frontmatter schema, section template, ≤200-line budget, OMP-native execution, state contract); checker with `--filter`/`--fix` (regenerates `INDEX.md` — never hand-edited); catalog contract test runs in CI |
 | 16 attack scanners | `src/pentest/scanners/` | cors_checker, idor_tester, ssti_tester, ssrf_listener, jwt_tamper, … via the `attack_script` tool |
 | 7 built-in tools | `tools/` | `attack_script`, `methodology`, `web_crawl`, `bolt`, `bolt_status`, `http_log`, `session_bot` |
@@ -234,6 +234,13 @@ stay copy-local (see `packages/coding-agent/src/pentest/ATTRIBUTION.md` and
 OMP-authored additions (SKILL-AUTHORING.md, checker, catalog test,
 orchestration) are MIT like the rest of the repo; ported content stays
 AGPL-3.0/CC-BY-SA — see ATTRIBUTION.md for the split.
+
+The web pentest surface (OWASP WSTG 4.2 families, attack-* playbooks, 16
+scanners) is synced from [CyberStrikeus/CyberStrike](https://github.com/CyberStrikeus/CyberStrike) —
+last verified 2026-08-23: upstream `WEB/OWASP_WSTG_4.2` and every `attack-*`
+playbook are unchanged since our base checkout `71e14833`, so the bundled
+catalog is current. Provenance and licensing split in
+`packages/coding-agent/src/pentest/ATTRIBUTION.md`.
 
 ## Operational policy — internal red team
 
@@ -585,6 +592,24 @@ providers:
         contextWindow: 100000
         maxTokens: 32000
 ```
+**Self-hosted model quirk — `forceToolChoiceOnEmpty`:** some local
+fine-tunes (e.g. security-tuned reasoning models on SGLang) can emit tool
+calls when forced but never volunteer one under the default `auto` choice —
+the turn streams thinking, then ends with no text and no call, stalling the
+session. Add the flag to the provider entry to re-issue any such empty turn
+once with `tool_choice: "required"`:
+
+```yaml
+providers:
+  mog:
+    baseUrl: http://192.168.10.2:8000/v1
+    api: openai-completions
+    apiKey: dummy
+    forceToolChoiceOnEmpty: true
+```
+
+Default off; healthy models are never affected (a usable turn — prose or a
+call — passes through untouched, and the retry fires at most once per turn).
 
 Run `omp models spark` to verify discovery. Then run `omp setup` and choose the model in the default-model step, or open `/model` in a session and assign it to the `default` role.
 
