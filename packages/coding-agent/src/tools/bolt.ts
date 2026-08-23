@@ -104,13 +104,27 @@ export class BoltTool implements AgentTool<typeof boltSchema, BoltToolDetails> {
 					throw new ToolError("bolt pair requires name, url and adminToken");
 				}
 				const result = await pairWithBolt(params.name, params.url, params.adminToken);
+				// The MCP manager reconnects the server so its mcp__<name>_<tool>
+				// tools come up immediately — no restart or manual /mcp reconnect
+				// needed. When the server isn't configured yet (no bolt.servers
+				// or mcp.json entry), the manager has nothing to connect: guide
+				// the operator to the config and the one-command reconnect.
+				let reconnected = false;
+				try {
+					const connection = await this.session.mcpManager?.reconnectServer(params.name, { manual: true });
+					reconnected = connection !== null && connection !== undefined;
+				} catch {
+					reconnected = false;
+				}
+				const text = reconnected
+					? `paired: clientId ${result.clientId}, serverFingerprint ${result.serverFingerprint}. ` +
+						`Reconnected — the mcp__${params.name}_<tool> tools are live.`
+					: `paired: clientId ${result.clientId}, serverFingerprint ${result.serverFingerprint}. ` +
+						`No configured server named '${params.name}' in this session's MCP manager — add ` +
+						`bolt.servers.${params.name} (omp config set bolt.servers.${params.name}.url <url>) or an ` +
+						`mcp.json {"type": "bolt"} entry, then /mcp reconnect ${params.name} (or start a new session).`;
 				return {
-					content: [
-						{
-							type: "text",
-							text: `paired: clientId ${result.clientId}, serverFingerprint ${result.serverFingerprint}.\nRESTART the session or run /mcp reconnect for the server's MCP tools (mcp__${params.name}_<tool>).`,
-						},
-					],
+					content: [{ type: "text", text }],
 					details: { action: "pair", name: params.name },
 				};
 			}

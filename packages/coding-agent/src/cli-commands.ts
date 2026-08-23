@@ -52,6 +52,11 @@ export const commands: CommandEntry[] = [
 		help: commandHelp.browserRelayHelp,
 	},
 	{
+		name: "bolt",
+		load: () => import("./commands/bolt").then(m => m.default),
+		help: commandHelp.boltHelp,
+	},
+	{
 		name: "cleanse",
 		load: () => import("./commands/cleanse").then(m => m.default),
 		help: commandHelp.cleanseHelp,

@@ -20,15 +20,19 @@ everything goes through the tool).
 
 Print the tool output verbatim.
 
-## 2. After pairing — restart required
+## 2. After pairing — tools come up automatically
 
-Explain to the user:
-
-- Pairing stores credentials under `<agentDir>/bolt-keys/<name>.json` and the
-  server entry comes from the `bolt.servers` setting.
-- The omp session must be **restarted** (or MCP reconnected via `/mcp`) after
-  `pair`, so the MCP manager re-exposes the remote tools as ambient session
-  tools named `mcp__<server>_<tool>` (check `bolt_status`/`bolt list` first).
+- Pairing stores credentials under `<agentDir>/bolt-keys/<name>.json`; the
+  server entry comes from the `bolt.servers` setting (or an mcp.json
+  `{"type": "bolt"}` entry).
+- The `pair` action reconnects the MCP manager automatically: when the
+  server is already configured, the `mcp__<server>_<tool>` tools go live
+  immediately. When no server entry exists yet, the tool prints the exact
+  config command (`omp config set bolt.servers.<name>.url <url>` or mcp.json)
+  and a `/mcp reconnect <name>` to apply it in the running session.
+- `omp bolt pair <name> <url> --admin-token <token>` is the native CLI
+  equivalent (no session needed); new sessions pick up configured servers
+  at startup.
 - Once live, EVERY agent (main and subagents) can use them without further
   commands — e.g. `/pentest` phases prefer `mcp__<server>_bash` for heavy
   scans from the remote network position.

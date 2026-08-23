@@ -19,6 +19,7 @@
 
 ## Notes
 - Pairing exchanges Ed25519 identities and persists the keypair + client registration locally; re-pairing after a server-side rotation is detected by the transport.
+- **Native setup** (no LLM needed): `omp config set bolt.servers.<name>.url <url>` (or an mcp.json `{"type": "bolt"}` entry) + `omp bolt pair <name> <url> --admin-token <token>`. The session tool's `pair` action reconnects the MCP manager automatically; the CLI (`omp bolt pair`) is for headless/scripted use — new sessions pick up the server at startup.
 - The transport rides the shared streamable-HTTP MCP transport (`mcp/transports/http.ts`): the per-request Ed25519 signature is injected through its request-header hook, and session affinity, SSE response handling, server-to-client requests, timeouts, and DELETE session termination come from upstream.
 - `run` falls back to the server's `run_command` tool for commands the server does not expose as dedicated tools.
 - The ambient `mcp__<server>__*` tools appear after pairing — the connected server's tools are callable directly.
