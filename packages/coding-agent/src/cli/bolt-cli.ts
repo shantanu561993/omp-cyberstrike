@@ -59,6 +59,24 @@ export async function runBoltCommand(args: BoltCommandArgs): Promise<void> {
 				}
 			}
 			const { clientId, serverFingerprint } = await pairWithBolt(args.name, url, args.adminToken);
+			// Pairing alone leaves the MCP manager with nothing to connect (the
+			// confusing "No MCP servers configured" state). Auto-declare the
+			// server in bolt.servers so the session registers it at startup.
+			const settings = await Settings.init();
+			const servers =
+				(settings.get("bolt.servers") as
+					| Record<string, { url: string; timeout?: number; enabled?: boolean }>
+					| undefined) ?? {};
+			const existing = servers[args.name];
+			if (!existing) {
+				settings.set("bolt.servers", { ...servers, [args.name]: { url } });
+				await settings.flush();
+				console.log(`declared '${args.name}' in bolt.servers (url ${url})`);
+			} else if (existing.url.replace(/\/+$/, "") !== url.replace(/\/+$/, "")) {
+				console.warn(
+					`warning: bolt.servers.${args.name}.url is '${existing.url}' but you paired against '${url}' — the session connects to the declared URL.`,
+				);
+			}
 			console.log(`paired: clientId ${clientId}, serverFingerprint ${serverFingerprint}`);
 			console.log(
 				`Credentials stored for '${args.name}'. The MCP manager connects configured Bolt servers at startup — ` +
