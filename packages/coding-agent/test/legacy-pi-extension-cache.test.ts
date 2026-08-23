@@ -35,11 +35,11 @@ test("legacy extension analysis persists and reads its SQLite parse cache", asyn
 	const tempDir = TempDir.createSync("@legacy-pi-extension-cache-");
 	tempDirs.push(tempDir);
 	const cacheRoot = tempDir.path();
-	await fs.mkdir(path.join(cacheRoot, "omp"), { recursive: true });
+	await fs.mkdir(path.join(cacheRoot, "omp-cyberstrike"), { recursive: true });
 
 	expect(await runProbe(cacheRoot)).toBe('import value from "./dependency.js?mtime=7";\n');
 
-	const cachePath = path.join(cacheRoot, "omp", "cache", "legacy-pi-extension-cache.db");
+	const cachePath = path.join(cacheRoot, "omp-cyberstrike", "cache", "legacy-pi-extension-cache.db");
 	const db = new Database(cachePath);
 	const result = db.run(
 		"UPDATE extension_parse_cache SET [references] = '[]' WHERE [references] LIKE '%dependency.js%'",
