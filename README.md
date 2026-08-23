@@ -235,11 +235,13 @@ OMP-authored additions (SKILL-AUTHORING.md, checker, catalog test,
 orchestration) are MIT like the rest of the repo; ported content stays
 AGPL-3.0/CC-BY-SA — see ATTRIBUTION.md for the split.
 
-## Authorized use only
+## Operational policy — internal red team
 
-The pentest tooling runs active security testing. Use it exclusively against
-targets you are authorized to test; `/pentest` enforces an authorization gate
-before any request.
+The pentest tooling is operated by the organization's internal red team
+against in-scope targets the team owns or is contracted to test. The
+`/pentest` command treats every invocation as operator-authorized for the
+declared scope and follows the operator-set operational constraints
+(scope, destructive policy, rate limits) as engagement boundaries.
 
 ---
 
