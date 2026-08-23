@@ -266,7 +266,7 @@ function renderIndex(skills: PortedSkill[], src: string): string {
 	lines.push("");
 	lines.push(`Source: \`${src}\` (see ATTRIBUTION.md for provenance and license).`);
 	lines.push("");
-	lines.push("Each skill is loaded on demand via `skill://<name>`. The `web-pentest`");
+	lines.push("Each skill is loaded on demand via the `read` tool (`path: \"skill://<name>\"`; `skill://` is a read-path, never a tool name). The `web-pentest`");
 	lines.push("umbrella skill maps every phase to the relevant skills below.");
 	lines.push("");
 	lines.push("## WSTG 4.2 families");

@@ -47,8 +47,7 @@ function renderStatusTable(phases: MethodologyPhaseRecord[]): string {
 // number of tasks whose status changed.
 function mirrorTodoStatuses(session: ToolSession, ops: Array<{ op: "start" | "done"; phaseId: string }>): number {
 	const current = session.getTodoPhases?.();
-	const appendEntry = session.sessionManager?.appendCustomEntry;
-	if (!current || !appendEntry || ops.length === 0) return 0;
+	if (!current || !session.sessionManager || ops.length === 0) return 0;
 	const next: TodoPhase[] = current.map(phase => ({
 		name: phase.name,
 		tasks: phase.tasks.map(task =>
@@ -76,7 +75,7 @@ function mirrorTodoStatuses(session: ToolSession, ops: Array<{ op: "start" | "do
 	}
 	if (changed === 0) return 0;
 	session.setTodoPhases?.(next);
-	appendEntry(USER_TODO_EDIT_CUSTOM_TYPE, { phases: next });
+	session.sessionManager.appendCustomEntry(USER_TODO_EDIT_CUSTOM_TYPE, { phases: next });
 	return changed;
 }
 

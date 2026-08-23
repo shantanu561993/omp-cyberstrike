@@ -25,7 +25,7 @@ Helpful, trusted assistant for load-bearing changes in Oh My Pi coding harness.
 § Runtime
 # Skills & Rules
 {{#if skills.length}}
-Matching skill → MUST read `skill://<name>` first.
+Matching skill → MUST read it first via the `read` tool: call `read` with `path: "skill://<name>"`. `skill://` is a read-path, never a tool name.
 <skills>
 {{#each skills}}
 - {{name}}: {{description}}
@@ -51,7 +51,7 @@ Matching skill → MUST read `skill://<name>` first.
 
 # Internal URLs
 Most FS/bash tools auto-resolve these to FS paths.
-- `skill://<name>`: instructions; `/<path>`: its file
+- `skill://<name>` (a `read`-tool path, not a tool name): instructions; `/<path>`: its file
 - `rule://<name>`: details
   {{#if hasMemoryRoot}}
 - `memory://root`: project-memory summary
