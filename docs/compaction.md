@@ -411,7 +411,38 @@ Post-navigation event exposing new/old leaf and optional summary entry.
   - overflow path emits `Context overflow recovery failed: ...`
   - incomplete-output path emits `Incomplete response recovery failed: ...`
   - threshold/idle paths emit `Auto-compaction failed: ...`
-- Branch summarization can be cancelled via abort signal (e.g., Escape), returning canceled/aborted navigation result.
+## Troubleshooting: `400 Requested token count exceeds the model's maximum context length`
+
+**Symptom.** The provider rejects turns with `400 ... maximum context length of N tokens. You requested a total of M tokens: X tokens from the input messages and Y tokens for the completion`, and compaction/handoff rescues fail with the same error. Common on small-context local models (SGLang, vLLM, llama.cpp, LM Studio) whose `/v1/models` reports an exact `max_model_len`.
+
+**Cause.** The compaction threshold reserves room for the *reply* using a default that can be smaller than the output budget omp actually requests. The threshold is `contextWindow − reserve`, where the unset reserve is `max(16384, 15% of contextWindow)`. If the model's output budget (`maxTokens`, typically `32768` for discovered OpenAI-compatible models) exceeds that reserve, omp fills the window with conversation and the reply overflows it:
+
+```
+safe input ceiling = contextWindow − maxTokens
+threshold           = contextWindow − max(16384, 15% × contextWindow)
+400s occur when     input > safe input ceiling, i.e. between the ceiling and the threshold
+```
+
+**Fix.** Set `compaction.reserveTokens` to at least the model's output budget in `config.yml`:
+
+```yaml
+compaction:
+  reserveTokens: 32768   # = the model's maxTokens / output budget
+```
+
+This does **not** reduce the model's output — `max_completion_tokens` is unchanged. It only makes compaction trigger earlier so the full reply fits. Verify with `omp config get compaction.reserveTokens`, or check the log's `Auto-compaction threshold decision` entry: `thresholdTokens` should equal `contextWindow − reserveTokens` instead of `contextWindow − max(16384, 15% × contextWindow)`.
+
+**Worked example** (131072-token window, 32768 output budget):
+
+| Value | Tokens |
+|---|---|
+| `contextWindow` (server `max_model_len`) | 131,072 |
+| `maxTokens` (output budget) | 32,768 |
+| Safe input ceiling (`131072 − 32768`) | 98,304 |
+| Default threshold (`131072 − max(16384, 19660)`) | 111,412 ← too late, 400s |
+| Threshold with `reserveTokens: 32768` | 98,304 ← fires before overflow |
+
+**Why the default reserve exists.** For large windows (e.g. 1M) the 15% reserve dwarfs any realistic reply, so `maxTokens` is a non-issue there. The trap is only on small windows where `maxTokens` is a large fraction of `contextWindow`. Per-model `maxTokens` in `models.yml` flows to the wire request but **not** to the compaction threshold; `compaction.reserveTokens` is the global lever that fixes the threshold today.
 
 ## Settings and defaults
 
