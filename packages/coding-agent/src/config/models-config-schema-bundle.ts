@@ -299,6 +299,15 @@ export const getModelsConfigSchemaBundle = once(() => {
 		 * and `apiKey` must carry the gateway bearer.
 		 */
 		"transport?": '"pi-native"',
+		/**
+		 * Re-issue a turn that returns an empty assistant message (no text, no
+		 * tool call) once with `tool_choice: "required"`. For self-hosted
+		 * models/servers whose tool-calling regressed — they reason but never
+		 * volunteer a call under the default `auto` choice — the forced retry
+		 * turns a stall into a real tool call. Default off; other providers
+		 * never notice.
+		 */
+		"forceToolChoiceOnEmpty?": "boolean",
 	}).narrow((value, ctx) => {
 		if (value.baseUrl !== undefined && typeof value.baseUrl === "string" && value.baseUrl.length === 0) {
 			return ctx.mustBe("baseUrl a non-empty string");

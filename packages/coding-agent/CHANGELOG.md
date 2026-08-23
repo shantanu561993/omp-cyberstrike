@@ -2,9 +2,7 @@
 
 ## [Unreleased]
 
-### Added
-
-- Added the `/pin` slash command to pin and unpin sessions so they stay at the top of the `--resume` picker UI.
+- New per-provider `forceToolChoiceOnEmpty` models.yml option: a turn that returns an empty assistant message (no text, no tool call) is re-issued once with a forced tool call, so self-hosted models whose tool-calling regressed act instead of stalling.
 ### Changed
 
 - Slash-command autocomplete now collapses skills into a single `/skill:` row; the individual skills list once the prefix reaches `/skill:` (accepting the row with Tab/Enter expands it in place).
