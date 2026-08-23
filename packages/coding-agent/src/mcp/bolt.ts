@@ -199,9 +199,13 @@ export class BoltNotPairedError extends Error {
  *
  * Rides the shared streamable-HTTP transport (`mcp/transports/http.ts`): MCP
  * session affinity, SSE response handling, server-to-client requests,
- * timeouts, and DELETE session termination come from upstream. The only
- * bolt-specific part is the per-request Ed25519 signature, injected through
- * the transport's request-header hook.
+ * timeouts, and DELETE session termination come from upstream. The
+ * bolt-specific parts: the per-request Ed25519 signature (injected through
+ * the request-header hook) and three wire-surface overrides that keep the
+ * bolt protocol exactly as the client verified against real CyberStrike
+ * Bolt servers — no MCP-Protocol-Version header, no GET SSE listener, and
+ * notification failures that must not kill the connection (the original
+ * bolt client sent notifications fire-and-forget).
  */
 export class BoltTransport extends HttpTransport {
 	constructor(creds: BoltCredentials, config: BoltTransportConfig) {
@@ -212,6 +216,29 @@ export class BoltTransport extends HttpTransport {
 		super({ type: "http", url, timeout: config.timeout }, (init: MCPFetchInit) =>
 			signRequest(creds, init.method, new URL(url).pathname + new URL(url).search, init.body ?? ""),
 		);
+	}
+
+	/** Bolt's JSON-RPC surface is version-agnostic — never send MCP-Protocol-Version. */
+	override setProtocolVersion(_version: string): void {}
+
+	/** The bolt protocol has no GET SSE listener (signed POSTs only). */
+	override async startSSEListener(): Promise<void> {}
+
+	/**
+	 * Notifications are fire-and-forget on bolt servers: a rejected
+	 * `notifications/initialized` must not fail the connection (the original
+	 * bolt client swallowed these errors).
+	 */
+	override async notify(method: string, params?: Record<string, unknown>): Promise<void> {
+		try {
+			await super.notify(method, params);
+		} catch (err) {
+			logger.debug("bolt notification failed (non-fatal)", {
+				method,
+				url: this.url,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
 	}
 }
 
