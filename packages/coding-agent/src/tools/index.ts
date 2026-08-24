@@ -53,7 +53,6 @@ import { resolveEvalBackends } from "./eval-backends";
 import { GithubTool } from "./gh";
 import { GlobTool } from "./glob";
 import { GrepTool } from "./grep";
-import { HttpLogTool } from "./http-log";
 import { HubTool, isIrcEnabled } from "./hub";
 import { InspectImageTool } from "./inspect-image";
 import { LearnTool } from "./learn";
@@ -464,7 +463,6 @@ export const BUILTIN_TOOLS: Record<BuiltinToolName, ToolFactory> = {
 	learn: LearnTool.createIf,
 	manage_skill: ManageSkillTool.createIf,
 	attack_script: s => new AttackScriptTool(s),
-	http_log: s => new HttpLogTool(s),
 	methodology: s => new MethodologyTool(s),
 	web_crawl: s => new WebCrawlTool(s),
 	session_bot: s => new SessionBotTool(s),

@@ -6,7 +6,7 @@
  * into the standard pentest artifacts — `<out>/requests.jsonl`,
  * `<out>/http.log`, `<out>/responses/<sha8>.txt` — the same files `web_crawl`
  * produces, so recon via the browser tool feeds every downstream consumer
- * (endpoint extraction, flow.json, guardian-bot probe, http_log queries).
+ * (endpoint extraction, flow.json, guardian-bot probe, http.log queries).
  */
 
 import * as fs from "node:fs";

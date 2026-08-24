@@ -1,8 +1,9 @@
 # Changelog
 
-## [Unreleased]
 
-- New per-provider `forceToolChoiceOnEmpty` models.yml option: a turn that returns an empty assistant message (no text, no tool call) is re-issued once with a forced tool call, so self-hosted models whose tool-calling regressed act instead of stalling.
+### Removed
+
+- Removed the pentest `http_log` tool and its manual "append http_log" instructions; HTTP traffic is captured automatically (browser relay, bolt, web_crawl) into `<out>/http.log`.
 ## [18.0.2] - 2026-08-23
 
 ### Added

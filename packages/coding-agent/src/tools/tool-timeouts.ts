@@ -17,7 +17,6 @@ export const TOOL_TIMEOUTS = {
 	lsp: { default: 20, min: 5, max: 300 },
 	debug: { default: 30, min: 5, max: 300 },
 	attack_script: { default: 120, min: 1, max: 600 },
-	http_log: { default: 10, min: 1, max: 60 },
 	methodology: { default: 10, min: 1, max: 60 },
 	web_crawl: { default: 300, min: 1, max: 900 },
 	session_bot: { default: 10, min: 1, max: 60 },

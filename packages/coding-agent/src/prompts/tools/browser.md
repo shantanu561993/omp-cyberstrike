@@ -26,7 +26,7 @@ Drives real Chromium tab; full puppeteer access via JS.
 
 ## Traffic capture
 
-With `out` set on a relay browser (`app.relay: true`), every request/response of agent-driven tabs lands in `<out>/requests.jsonl` + `<out>/http.log` (bodies in `<out>/responses/`) — same artifacts as `web_crawl`, queryable via `http_log`. Scope notes: only tabs the agent drives are captured, and main-frame traffic only (OOPIF subframes are not captured).
+With `out` set on a relay browser (`app.relay: true`), every request/response of agent-driven tabs lands in `<out>/requests.jsonl` + `<out>/http.log` (bodies in `<out>/responses/`) — same artifacts as `web_crawl`. Scope notes: only tabs the agent drives are captured, and main-frame traffic only (OOPIF subframes are not captured).
 </instruction>
 
 <critical>

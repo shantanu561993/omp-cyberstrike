@@ -20,4 +20,4 @@
 
 ## Notes
 - `exec` approval tier: every invocation is surfaced for user approval.
-- Output streams to the result; sweep runs should be saved to `<out>/sweep/<scanner>.log` and mirrored into the http log via `http_log` with `source: "scanner"`.
+- Output streams to the result; sweep runs should be saved to `<out>/sweep/<scanner>.log`.

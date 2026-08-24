@@ -29,7 +29,6 @@ export const BUILTIN_TOOL_NAMES = [
 	"learn",
 	"manage_skill",
 	"attack_script",
-	"http_log",
 	"methodology",
 	"web_crawl",
 	"session_bot",

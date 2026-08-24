@@ -47,13 +47,13 @@ remote-execution protocol), re-implemented as in-tree OMP features:
 | 144 embedded skills (143 hidden + `web-pentest` umbrella) + 143 companion payload files | `packages/coding-agent/src/pentest/skills/` | OWASP WSTG 4.2 checklist + attack playbooks, loaded on demand via `skill://` (small-context friendly: nothing auto-injected); payload lists, DB variants and test scripts live in per-skill companions (`payloads.md`, `refs.md`, `scripts/`) |
 | Skill authoring contract + validation | `skills/web-pentest/SKILL-AUTHORING.md` · `scripts/check-pentest-skills.ts` · `test/pentest/skills-catalog.test.ts` | canonical rules (frontmatter schema, section template, ≤200-line budget, OMP-native execution, state contract); checker with `--filter`/`--fix` (regenerates `INDEX.md` — never hand-edited); catalog contract test runs in CI |
 | 16 attack scanners | `src/pentest/scanners/` | cors_checker, idor_tester, ssti_tester, ssrf_listener, jwt_tamper, … via the `attack_script` tool |
-| 7 built-in tools | `tools/` | `attack_script`, `methodology`, `web_crawl`, `bolt`, `bolt_status`, `http_log`, `session_bot` |
+| 6 built-in tools | `tools/` | `attack_script`, `methodology`, `web_crawl`, `bolt`, `bolt_status`, `session_bot` |
 | Vendored crawler | `packages/hackbrowser/` (AGPL, attributed) | LLM-navigated crawl with full HTTP capture, **session export** (Netscape jar + auth headers) |
 | Session-guardian bot | `packages/hackbrowser/session-bot.ts` | Keeps exported sessions alive: probes every 15 s, detects death (non-2xx / content-length drift), re-authenticates, atomically refreshes the jar |
 | 13-phase methodology state machine | `src/pentest/methodology.ts` | CyberStrike phase order, prerequisite enforcement, WSTG coverage audit |
 | Native Bolt MCP transport | `src/mcp/bolt.ts` | Ed25519 pairing + signed JSON-RPC over HTTP; remote machines expose `mcp__<server>_<tool>` tools; verified against the real `ghcr.io/cyberstrikeus/bolt:latest` |
 | Bundled commands + agent | `src/prompts/agents/` | `/pentest <url>` (deterministic intake, scanner sweep + 13 phase workers with budget/handover, coverage report) and `/bolt` (pair/list/run/…), `web-pentester` agent with structured yields |
-| All-traffic audit log | `src/pentest/http-log.ts` | `<out>/http.log` JSONL index + deduped body store; tool-capped lookback (nothing auto-injected into prompts) |
+| All-traffic audit log | `src/pentest/http-log.ts` | `<out>/http.log` JSONL index + deduped body store; auto-logged by the browser relay, bolt, and web_crawl (nothing auto-injected into prompts) |
 
 ## The pentest pipeline (`/pentest <url>`)
 
@@ -240,7 +240,7 @@ under `node`) and **Python 3** for the `attack_script` scanners. Without
 either, the respective tool errors clearly.
 
 Not crawling? Skip step 2 — every other feature (skills, scanners, `/pentest`
-with `--no-crawl`, Bolt, http_log, session bot) works from the bare binary.
+with `--no-crawl`, Bolt, session bot) works from the bare binary.
 
 ## Updating from upstream
 

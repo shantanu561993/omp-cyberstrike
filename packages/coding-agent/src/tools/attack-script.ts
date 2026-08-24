@@ -47,7 +47,7 @@ export interface AttackScriptToolDetails {
 	command: string;
 }
 
-export const attackScriptDescription = `Run one of the 16 embedded CyberStrike web pentest scanners against a target. Scanners: ${ATTACK_SCANNERS.join(", ")}. Pass \`args\` as the scanner's CLI arguments (run the script with args ["--help"] first when unsure of the syntax). Long-running scanners (e.g. ssrf_listener) may be started with a high \`timeout\`; their output is streamed to the result. Output of every sweep run should be saved to <out>/sweep/<scanner>.log and mirrored into http.log via http_log (source: "scanner").`;
+export const attackScriptDescription = `Run one of the 16 embedded CyberStrike web pentest scanners against a target. Scanners: ${ATTACK_SCANNERS.join(", ")}. Pass \`args\` as the scanner's CLI arguments (run the script with args ["--help"] first when unsure of the syntax). Long-running scanners (e.g. ssrf_listener) may be started with a high \`timeout\`; their output is streamed to the result. Output of every sweep run should be saved to <out>/sweep/<scanner>.log.`;
 
 export class AttackScriptTool implements AgentTool<typeof attackScriptSchema, AttackScriptToolDetails> {
 	readonly name = "attack_script";
