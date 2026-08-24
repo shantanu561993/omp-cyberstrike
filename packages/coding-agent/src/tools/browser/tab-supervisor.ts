@@ -712,10 +712,31 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
 	// target may be backgrounded, so retain activation for target-correct pixels.
 	const userDriven = browser.kind.kind === "connected" || browser.kind.kind === "relay";
 	const activateForScreenshot = !userDriven || !shouldPreserveConnectedBrowserFocus(opts.target);
-	const page = await pickElectronTarget(browser.browser, {
-		matcher: opts.target,
-		preferVisible: !activateForScreenshot,
-	});
+	// A freshly-launched managed chromium (or a relay with no open tabs) has no
+	// page targets; adopting one would throw "No page targets available". When a
+	// URL was requested, create a tab instead so the relay capture path can
+	// drive it (the bridge implements Target.createTarget and claims the tab).
+	let page: Page;
+	try {
+		page = await pickElectronTarget(browser.browser, {
+			matcher: opts.target,
+			preferVisible: !activateForScreenshot,
+		});
+	} catch (error) {
+		// Empty relay/managed browser: adopt fails ("No page targets available").
+		// A matcher miss ("No page target matched …") means tabs exist but none
+		// fit — creating a new one would defeat the caller's intent, so rethrow.
+		if (
+			opts.url &&
+			browser.kind.kind === "relay" &&
+			error instanceof ToolError &&
+			error.message.includes("No page targets available")
+		) {
+			page = await browser.browser.newPage();
+		} else {
+			throw error;
+		}
+	}
 	const targetId = await targetIdForPage(page);
 	return {
 		mode: "attach",
