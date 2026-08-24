@@ -114,6 +114,7 @@ import {
 	onModelRolesChanged,
 } from "../config/settings";
 import { RawSseDebugBuffer } from "../debug/raw-sse-buffer";
+import { dumpRawSseToDisk, sessionDebugLog, sessionDebugLogEnabled } from "../debug/session-debug-log";
 import { getFileSnapshotStore } from "../edit/file-snapshot-store";
 import type { PythonResult } from "../eval/py/executor";
 import type { BashResult } from "../exec/bash-executor";
@@ -2120,6 +2121,24 @@ export class AgentSession {
 	#subscriberEmitGate: Promise<void> = Promise.resolve();
 
 	async #emitSessionEvent(event: AgentSessionEvent, options: { detachExtensions?: boolean } = {}): Promise<void> {
+		// Debug-build trace tee: committed messages (thinking + text + tool
+		// calls), tool results/errors, and lifecycle events go to
+		// <logs>/debug/debug-session.<pid>.log (no-op unless enabled).
+		if (sessionDebugLogEnabled()) {
+			sessionDebugLog(event);
+			// Per-turn raw provider SSE dump (bounded: the ring buffer holds the
+			// last ~1000 events). turn_end covers interactive flows; terminal
+			// message_update events (done/error) and assistant message_end catch
+			// one-shot/-p runs that never emit a turn_end.
+			const assistantTurnFinished =
+				event.type === "turn_end" ||
+				(event.type === "message_update" &&
+					(event.assistantMessageEvent.type === "done" || event.assistantMessageEvent.type === "error")) ||
+				(event.type === "message_end" && event.message.role === "assistant");
+			if (assistantTurnFinished) {
+				dumpRawSseToDisk(this.rawSseDebugBuffer.toRawText(), this.sessionId, "assistant_turn");
+			}
+		}
 		if (event.type === "message_update") {
 			this.#emit(event);
 			void this.#queueExtensionEvent(event);
@@ -4206,6 +4225,9 @@ export class AgentSession {
 	#releaseRetainedSessionMemory(): void {
 		this.agent.reset();
 		this.agent.setAppendOnlyContext(undefined);
+		if (sessionDebugLogEnabled()) {
+			dumpRawSseToDisk(this.rawSseDebugBuffer.toRawText(), this.sessionId, "dispose");
+		}
 		this.rawSseDebugBuffer.clear();
 		this.sessionManager.releaseRetainedEntries();
 	}

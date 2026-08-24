@@ -72,8 +72,9 @@ async function runCommand(
 
 async function main(): Promise<void> {
 	const crossBuild = resolveCrossBuild(Bun.env.CROSS_TARGET);
+	const debugBuild = Bun.env.OMP_DEBUG_BUILD === "1";
 	const shouldAdhocSign = process.platform === "darwin" && !crossBuild && Bun.env.BUN_NO_CODESIGN_MACHO_BINARY !== "1";
-	const outName = crossBuild ? `omp-${crossBuild.id}` : "omp";
+	const outName = crossBuild ? `omp-${crossBuild.id}` : debugBuild ? "omp-debug" : "omp";
 	const outputPath = path.join(packageDir, "dist", outName);
 	// Generate inside the try so the finally always restores the empty checked-in
 	// placeholders (stats client archive, docs index) even on failure.
@@ -97,6 +98,7 @@ async function main(): Promise<void> {
 				target: crossBuild?.target,
 				executablePath: Bun.env.BUN_COMPILE_EXECUTABLE_PATH || undefined,
 				skipBuiltinCodesign: shouldAdhocSign,
+				debug: debugBuild,
 			});
 
 			if (shouldAdhocSign) {

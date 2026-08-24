@@ -22,6 +22,12 @@ export interface CodingAgentCompileOptions {
 	readonly minifyIdentifiers?: boolean;
 	/** Disable Bun's built-in Darwin signing before the caller re-signs. */
 	readonly skipBuiltinCodesign?: boolean;
+	/**
+	 * Debug build: bake PI_DEBUG_BUILD / PI_DEBUG_SESSION_LOG so the binary
+	 * writes the session trace (thinking + tool errors) and raw provider SSE
+	 * to <logs>/debug/, and inline sourcemaps for readable stacks.
+	 */
+	readonly debug?: boolean;
 }
 
 /**
@@ -42,7 +48,14 @@ export async function compileCodingAgent(options: CodingAgentCompileOptions): Pr
 				"process.env.PI_COMPILED": JSON.stringify("true"),
 				"process.env.PI_TINY_TRANSFORMERS_VERSION": JSON.stringify(options.transformersVersion),
 				"process.env.PI_DOCS_EMBED": JSON.stringify((await buildDocsIndexPayload()).payload),
+				...(options.debug
+					? {
+							"process.env.PI_DEBUG_BUILD": JSON.stringify("true"),
+							"process.env.PI_DEBUG_SESSION_LOG": JSON.stringify("1"),
+						}
+					: {}),
 			},
+			sourcemap: options.debug ? "inline" : undefined,
 			minify: {
 				identifiers: options.minifyIdentifiers ?? false,
 				keepNames: true,
