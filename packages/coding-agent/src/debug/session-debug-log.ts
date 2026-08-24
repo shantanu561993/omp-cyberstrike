@@ -275,7 +275,6 @@ export function sessionDebugLog(event: AgentSessionEvent): void {
 				}),
 			);
 			return;
-		case "message_update":
 		default:
 			return;
 	}
