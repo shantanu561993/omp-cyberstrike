@@ -3,7 +3,16 @@ import * as path from "node:path";
 import { $which, TempDir } from "@oh-my-pi/pi-utils";
 import { disposeJuliaKernelSessionsByOwner, executeJulia } from "../../src/eval/jl/executor";
 
-const HAS_JULIA = Boolean($which("julia"));
+// Gate on julia actually starting within the executor's availability probe
+// budget (10s), not just existing on PATH: fresh hosted runners ship julia,
+// but a cold first start (sysimage build) exceeds the probe, so `$which`
+// alone would run the suite against an interpreter that can never serve a
+// kernel. Upstream's persistent kata runners keep julia warm, which is why
+// the existence-only gate holds there.
+const juliaBinary = $which("julia");
+const HAS_JULIA = Boolean(
+	juliaBinary && Bun.spawnSync([juliaBinary, "-e", "exit(0)"], { timeout: 10_000 }).exitCode === 0,
+);
 const OWNER_ID = "julia-prelude-tests";
 
 describe.skipIf(!HAS_JULIA)("eval Julia prelude helpers", () => {
