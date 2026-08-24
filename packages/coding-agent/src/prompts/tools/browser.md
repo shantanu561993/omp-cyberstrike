@@ -23,6 +23,10 @@ Drives real Chromium tab; full puppeteer access via JS.
 - `app.relay: true` → drive the user's own Chrome tabs via the omp browser relay (auto-started; needs the OMP Browser Relay extension installed). `app.target` picks a tab by URL/title substring; without it the visible tab is adopted without stealing focus.
 - `close` releases the named tool session. It closes tool-owned headless pages and owned cmux surfaces, but NEVER closes pages in CDP-connected or relay browsers. Spawned-browser pages remain open unless `kill: true` terminates their process.
 - Selectors: CSS + puppeteer `aria/…`, `text/…`, `xpath/…`, `pierce/…`. Playwright-only pseudos (`:has-text()`, `:visible`) are REJECTED.
+
+## Traffic capture
+
+With `out` set on a relay browser (`app.relay: true`), every request/response of agent-driven tabs lands in `<out>/requests.jsonl` + `<out>/http.log` (bodies in `<out>/responses/`) — same artifacts as `web_crawl`, queryable via `http_log`. Scope notes: only tabs the agent drives are captured, and main-frame traffic only (OOPIF subframes are not captured).
 </instruction>
 
 <critical>
