@@ -82,9 +82,15 @@ function playwrightCacheRoots(): string[] {
 export async function resolvePlaywrightChromiumExecutable(): Promise<string | undefined> {
 	for (const root of playwrightCacheRoots()) {
 		for (const candidate of chromiumBinaryCandidates(path.join(root, CHROMIUM_CACHE_DIR))) {
-			if (await Bun.file(candidate).exists()) return candidate;
+			if (await Bun.file(candidate).exists()) {
+				logger.debug("relay chromium: resolved built-in playwright chromium", { root, candidate });
+				return candidate;
+			}
 		}
 	}
+	logger.debug("relay chromium: no built-in playwright chromium found in cache roots", {
+		roots: playwrightCacheRoots(),
+	});
 	return undefined;
 }
 
@@ -99,8 +105,16 @@ export async function resolvePlaywrightChromiumExecutable(): Promise<string | un
  */
 export async function launchRelayChromium(): Promise<void> {
 	try {
-		const executable = (await resolvePlaywrightChromiumExecutable()) ?? (await resolveSystemChromium());
-		if (!executable) return;
+		const builtin = await resolvePlaywrightChromiumExecutable();
+		const executable = builtin ?? (await resolveSystemChromium());
+		if (!executable) {
+			logger.warn(
+				"relay chromium: no executable resolved (playwright cache or system chrome) — gate handshake will fail",
+				{ cacheRoots: playwrightCacheRoots() },
+			);
+			return;
+		}
+		logger.debug("relay chromium: launching", { executable, source: builtin ? "playwright" : "system" });
 
 		// Materialize the extension (idempotent) so --load-extension has an
 		// unpacked dir to point at.
@@ -130,6 +144,12 @@ export async function launchRelayChromium(): Promise<void> {
 			!process.env.DISPLAY &&
 			!process.env.WAYLAND_DISPLAY;
 		const useXvfb = wantsXvfb && (await $which("xvfb-run")) !== null && (await $which("xauth")) !== null;
+		logger.debug("relay chromium: launch decisions", {
+			useXvfb,
+			wantsXvfb,
+			platform: process.platform,
+			profileDir: RELAY_CHROMIUM_PROFILE_DIR,
+		});
 
 		// A second launch against the same user-data-dir while the managed
 		// chromium is already running forwards to the existing instance and
@@ -138,15 +158,19 @@ export async function launchRelayChromium(): Promise<void> {
 			? Bun.spawn(["xvfb-run", "-a", ...args], { stdio: ["ignore", "ignore", "ignore"], detached: true })
 			: Bun.spawn(args, { stdio: ["ignore", "ignore", "ignore"], detached: true });
 		proc.unref?.();
+		logger.debug("relay chromium: spawned", { pid: proc.pid, args });
 		// A wrapper (xvfb-run) or chromium that dies within ~1s means the launch
 		// cannot succeed — surface it instead of letting the gate's handshake
 		// wait burn the full budget in silence.
 		Bun.sleep(1_000).then(() => {
 			if (proc.exitCode !== null) {
 				logger.warn("relay chromium exited immediately after launch", { exitCode: proc.exitCode });
+			} else {
+				logger.debug("relay chromium: alive after 1s", { pid: proc.pid });
 			}
 		});
-	} catch {
+	} catch (error) {
+		logger.warn("relay chromium: launch failed", { error: error instanceof Error ? error.message : String(error) });
 		// Best-effort: the gate's handshake wait decides; failure surfaces with
 		// the relay setup instructions.
 	}

@@ -21,6 +21,9 @@
  * - real child session ids (OOPIFs, workers) — created by Chrome under the
  *   shared root session and passed through verbatim
  */
+
+import { HTTP_LOG_BODY_CAP_BYTES } from "../../../pentest/http-log";
+import type { CaptureRecord } from "./captures";
 import type { ExtToRelayMessage, RelayRpcRequest, RelayToExtMessage, TabSnapshot } from "./protocol";
 
 /** Transport-agnostic websocket surface the bridge writes to. */
@@ -49,6 +52,30 @@ interface TargetInfo {
 	attached: boolean;
 	canAccessOpener: boolean;
 }
+
+/**
+ * A request observed but not yet finalized: correlated across the
+ * `Network.requestWillBeSent` → `responseReceived` → `loadingFinished` events.
+ */
+interface CapturePending {
+	tabId: number;
+	method: string;
+	url: string;
+	pageUrl: string;
+	requestBody?: string;
+	status?: number;
+	mimeType?: string;
+}
+
+/** Ring cap: 5000 records or 64 MB of JSON, whichever bites first. */
+const MAX_CAPTURE_RECORDS = 5000;
+const MAX_CAPTURE_BYTES = 64 * 1024 * 1024;
+/** Post bodies longer than this add nothing to recon (and bloat the ring). */
+const MAX_CAPTURE_POST_BYTES = 64 * 1024;
+/** Protocol streams and extension internals are never recon-relevant. */
+const CAPTURE_SKIP_URL = /^(ws:|wss:|data:|blob:|chrome-extension:)/i;
+/** Response types worth persisting; anything else drops unless the status already says failure. */
+const CAPTURE_BODY_MIME = /^(text\/|application\/(json|x-www-form-urlencoded|javascript|xml|xhtml\+xml|svg\+xml))/i;
 
 class CdpConnection {
 	discover = false;
@@ -167,6 +194,15 @@ export class RelayBridge {
 	#groupQueue: TabState[] = [];
 	/** True while {@link #drainGroupQueue} runs — group RPCs must never overlap. */
 	#groupDraining = false;
+	/** HTTP interactions of agent-driven tabs, oldest first; drained via `/captures`. */
+	#captures: CaptureRecord[] = [];
+	#captureSeq = 0;
+	/** Sum of JSON-stringified records in the ring (budget against `MAX_CAPTURE_BYTES`). */
+	#captureBytes = 0;
+	/** Records evicted by ring overflow since daemon start; surfaced via the drain header. */
+	#captureDropped = 0;
+	/** requestId → pending interaction awaiting `Network.responseReceived`/`loadingFinished`. */
+	#captureBodyCache = new Map<string, CapturePending>();
 
 	constructor(
 		opts: {
@@ -197,14 +233,14 @@ export class RelayBridge {
 		};
 	}
 
-	/** Payload for `GET /json/list` (debugging aid; per-target endpoints are not served). */
-	listTargets(): Array<Record<string, string>> {
-		const out: Array<Record<string, string>> = [];
-		for (const tab of this.#tabs.values()) {
-			if (!this.#eligible(tab)) continue;
-			out.push({ id: pageTargetId(tab.tabId), type: "page", title: tab.title, url: tab.url });
-		}
-		return out;
+	/**
+	 * Drain hook for the server's `GET /captures` endpoint: records with
+	 * `seq > since`, plus the count of records lost to ring overflow since
+	 * daemon start. The ring lives here, so draining works regardless of the
+	 * extension connection state.
+	 */
+	captureRecords(since: number): { records: CaptureRecord[]; dropped: number } {
+		return { records: this.#captures.filter(rec => rec.seq > since), dropped: this.#captureDropped };
 	}
 
 	// ---- extension lifecycle -------------------------------------------------
@@ -222,6 +258,8 @@ export class RelayBridge {
 		if (this.#ext !== socket) return;
 		this.#ext = null;
 		this.#extInfo = null;
+		// No loadingFinished events will ever arrive for in-flight requests.
+		this.#captureBodyCache.clear();
 		for (const pending of this.#pendingRpc.values()) {
 			clearTimeout(pending.timer);
 			pending.reject(new Error("relay extension disconnected"));
@@ -407,6 +445,9 @@ export class RelayBridge {
 			return;
 		}
 		try {
+			if (msg.method === "Page.navigate" || msg.method === "Page.reload") {
+				this.#log("forwarding navigation", { tabId, method: msg.method, url: msg.params?.url });
+			}
 			const result = await this.#rpc({
 				op: "send",
 				tabId,
@@ -416,6 +457,12 @@ export class RelayBridge {
 			});
 			this.#reply(conn, msg, (result as Record<string, unknown> | undefined) ?? {});
 		} catch (err) {
+			this.#log("forwarding failed", {
+				tabId,
+				method: msg.method,
+				url: msg.params?.url,
+				error: err instanceof Error ? err.message : String(err),
+			});
 			this.#replyError(conn, msg, err instanceof Error ? err.message : String(err));
 		}
 	}
@@ -552,6 +599,7 @@ export class RelayBridge {
 				const url =
 					typeof msg.params?.url === "string" && msg.params.url.length > 0 ? msg.params.url : "about:blank";
 				const result = (await this.#rpc({ op: "createTab", url })) as { tab: TabSnapshot };
+				this.#log("createTarget", { url, tabId: result.tab.tabId });
 				this.#onTabUpsert(result.tab);
 				// Creating a tab is an explicit act of driving it.
 				this.#claimTab(conn, result.tab.tabId);
@@ -636,6 +684,7 @@ export class RelayBridge {
 				this.#realSessionTabs.delete(child);
 			}
 		}
+		if (!sourceSessionId) this.#captureNetworkEvent(tabId, method, params);
 		if (sourceSessionId) {
 			// Event from a real child session: pass through verbatim to every
 			// connection that observes this tab.
@@ -653,6 +702,110 @@ export class RelayBridge {
 		}
 	}
 
+	// ---- traffic capture --------------------------------------------------------
+
+	/**
+	 * Record the tab's HTTP interactions into the capture ring. Agent-driven
+	 * tabs only (`#claimed`); root-session events carry main-frame network
+	 * activity — OOPIF/worker sub-session traffic is not captured in v1.
+	 * Record pushing is fire-and-forget: capture must never block the event
+	 * fan-out below.
+	 */
+	#captureNetworkEvent(tabId: number, method: string, params?: Record<string, unknown>): void {
+		const tab = this.#tabs.get(tabId);
+		if (!tab || !this.#claimed(tabId) || !/^https?:/i.test(tab.url)) return;
+		switch (method) {
+			case "Network.requestWillBeSent": {
+				const request = params?.request as Record<string, unknown> | undefined;
+				const requestId = typeof params?.requestId === "string" ? params.requestId : undefined;
+				const url = typeof request?.url === "string" ? request.url : undefined;
+				if (!requestId || !url || CAPTURE_SKIP_URL.test(url)) return;
+				let postData = typeof request?.postData === "string" ? request.postData : undefined;
+				if (postData && postData.length > MAX_CAPTURE_POST_BYTES) {
+					postData = postData.slice(0, MAX_CAPTURE_POST_BYTES);
+				}
+				this.#captureBodyCache.set(requestId, {
+					tabId,
+					method: typeof request?.method === "string" ? request.method : "GET",
+					url,
+					pageUrl: typeof params?.documentURL === "string" ? params.documentURL : tab.url,
+					requestBody: postData,
+				});
+				return;
+			}
+			case "Network.responseReceived": {
+				const requestId = typeof params?.requestId === "string" ? params.requestId : undefined;
+				const pending = requestId ? this.#captureBodyCache.get(requestId) : undefined;
+				if (!pending) return;
+				const response = params?.response as Record<string, unknown> | undefined;
+				if (typeof response?.status === "number") pending.status = response.status;
+				if (typeof response?.mimeType === "string") pending.mimeType = response.mimeType;
+				return;
+			}
+			case "Network.loadingFinished": {
+				const requestId = typeof params?.requestId === "string" ? params.requestId : undefined;
+				if (requestId === undefined) return;
+				const pending = this.#captureBodyCache.get(requestId);
+				if (!pending) return;
+				this.#captureBodyCache.delete(requestId);
+				if (!this.#captureBodyEligible(pending)) return;
+				void this.#rpc({
+					op: "send",
+					tabId,
+					method: "Network.getResponseBody",
+					params: { requestId },
+				})
+					.then(result => {
+						const response = result as { body?: string; base64Encoded?: boolean } | undefined;
+						if (!response || typeof response.body !== "string") return;
+						let body = response.base64Encoded
+							? Buffer.from(response.body, "base64").toString("utf8")
+							: response.body;
+						if (body.length > HTTP_LOG_BODY_CAP_BYTES) {
+							body = body.slice(0, HTTP_LOG_BODY_CAP_BYTES);
+						}
+						this.#pushCapture({
+							seq: ++this.#captureSeq,
+							ts: Date.now(),
+							tabId,
+							url: pending.url,
+							pageUrl: pending.pageUrl,
+							method: pending.method,
+							status: pending.status ?? 0,
+							requestBody: pending.requestBody,
+							body,
+						});
+					})
+					.catch(err => {
+						this.#log("network response body fetch failed", {
+							tabId,
+							url: pending.url,
+							error: err instanceof Error ? err.message : String(err),
+						});
+					});
+				return;
+			}
+		}
+	}
+
+	/** Only text-ish and error responses are worth the getResponseBody round-trip. */
+	#captureBodyEligible(pending: CapturePending): boolean {
+		if (pending.status !== undefined && pending.status >= 400) return true;
+		return pending.mimeType !== undefined && CAPTURE_BODY_MIME.test(pending.mimeType);
+	}
+
+	/** Append to the ring, evicting oldest on overflow (counted as dropped). */
+	#pushCapture(record: CaptureRecord): void {
+		this.#captures.push(record);
+		this.#captureBytes += JSON.stringify(record).length;
+		while (this.#captures.length > MAX_CAPTURE_RECORDS || this.#captureBytes > MAX_CAPTURE_BYTES) {
+			const evicted = this.#captures.shift();
+			if (!evicted) break;
+			this.#captureBytes -= JSON.stringify(evicted).length;
+			this.#captureDropped += 1;
+		}
+	}
+
 	#onTabDetached(tabId: number, reason: string): void {
 		const tab = this.#tabs.get(tabId);
 		if (!tab) return;
@@ -660,6 +813,11 @@ export class RelayBridge {
 		tab.attached = false;
 		tab.attaching = null;
 		tab.banned = true;
+		// In-flight requests will never see loadingFinished: drop their pending
+		// capture entries so the cache cannot grow without bound.
+		for (const [requestId, pending] of this.#captureBodyCache) {
+			if (pending.tabId === tabId) this.#captureBodyCache.delete(requestId);
+		}
 		// The user dismissed the debugger infobar (or the attach was torn
 		// down): release the tab's omp-group membership too.
 		this.#syncTabGrouping(tab);
@@ -869,6 +1027,15 @@ export class RelayBridge {
 		const attempt = this.#rpc({ op: "attach", tabId: tab.tabId })
 			.then(() => {
 				tab.attached = true;
+				// Traffic capture needs the Network domain on this tab. Also
+				// re-runs on service-worker-restart re-attach (same path).
+				// Fire-and-forget: capture must never block the attach handshake.
+				void this.#rpc({ op: "send", tabId: tab.tabId, method: "Network.enable" }).catch(err =>
+					this.#log("network capture enable failed", {
+						tabId: tab.tabId,
+						error: err instanceof Error ? err.message : String(err),
+					}),
+				);
 				return true;
 			})
 			.catch(err => {

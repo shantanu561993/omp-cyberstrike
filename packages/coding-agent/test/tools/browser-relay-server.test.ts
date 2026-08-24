@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { findFreeCdpPort } from "@oh-my-pi/pi-coding-agent/tools/browser/attach";
+import type { RelayBridge, RelaySocket } from "@oh-my-pi/pi-coding-agent/tools/browser/relay/bridge";
+import type { RelayRpcRequest, RelayToExtMessage } from "@oh-my-pi/pi-coding-agent/tools/browser/relay/protocol";
 import { type RelayServer, startRelayServer } from "@oh-my-pi/pi-coding-agent/tools/browser/relay/server";
 
 const EXTENSION_HELLO = {
@@ -144,5 +146,163 @@ describe("browser relay discovery endpoint", () => {
 		relay = startRelayServer({ port });
 		const response = await fetch(`http://127.0.0.1:${port}/json/version`);
 		expect(response.status).toBe(503);
+	});
+});
+/** Minimal relay→extension socket capturing RPCs for {@link ackBridge}. */
+class FakeExtSocket implements RelaySocket {
+	readonly messages: RelayToExtMessage[] = [];
+	readonly #acked = new Set<number>();
+	send(text: string): void {
+		this.messages.push(JSON.parse(text) as RelayToExtMessage);
+	}
+	close(): void {}
+	rpcs<Op extends RelayRpcRequest["op"]>(
+		op: Op,
+	): Array<{ t: "rpc"; id: number } & Extract<RelayRpcRequest, { op: Op }>> {
+		return this.messages.filter(
+			(msg): msg is { t: "rpc"; id: number } & Extract<RelayRpcRequest, { op: Op }> =>
+				msg.t === "rpc" && msg.op === op,
+		);
+	}
+	pending<Op extends RelayRpcRequest["op"]>(
+		op: Op,
+	): Array<{ t: "rpc"; id: number } & Extract<RelayRpcRequest, { op: Op }>> {
+		return this.rpcs(op).filter(msg => !this.#acked.has(msg.id));
+	}
+	markAcked(id: number): void {
+		this.#acked.add(id);
+	}
+}
+
+/** Downstream CDP socket capturing bridge replies (result passthrough only). */
+class FakeCdpSocket implements RelaySocket {
+	readonly messages: Array<Record<string, unknown>> = [];
+	send(text: string): void {
+		this.messages.push(JSON.parse(text) as Record<string, unknown>);
+	}
+	close(): void {}
+}
+
+/** Answer every unanswered extension RPC of `op` with `ok: true` and `result`. */
+function ackBridge(bridge: RelayBridge, socket: FakeExtSocket, op: RelayRpcRequest["op"], result: unknown = {}): void {
+	for (const rpc of socket.pending(op)) {
+		socket.markAcked(rpc.id);
+		bridge.extMessage(socket, JSON.stringify({ t: "rpcResult", id: rpc.id, ok: true, result }));
+	}
+}
+
+/** Flush the rpc .then() microtask chains (no timers involved). */
+async function flushBridge(): Promise<void> {
+	for (let i = 0; i < 5; i++) await Promise.resolve();
+}
+
+const CAPTURE_TAB = {
+	tabId: 5,
+	url: "http://127.0.0.1:8899/",
+	title: "Target",
+	active: false,
+	windowId: 1,
+	pinned: false,
+	groupId: -1,
+} as const;
+
+describe("browser relay capture endpoint", () => {
+	let relay: RelayServer | undefined;
+
+	afterEach(() => {
+		relay?.stop();
+		relay = undefined;
+	});
+
+	/** Populate the bridge ring with one captured interaction via fake sockets. */
+	async function populateOneCapture(): Promise<void> {
+		const bridge = relay!.bridge;
+		const ext = new FakeExtSocket();
+		bridge.extConnected(ext);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "hello",
+				userAgent: "test",
+				browserVersion: "Chrome/151.0.0.0",
+				tabs: [CAPTURE_TAB],
+				attachedTabIds: [],
+			}),
+		);
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: 1, method: "Target.createTarget", params: { url: CAPTURE_TAB.url } }),
+		);
+		ackBridge(bridge, ext, "createTab", { tab: CAPTURE_TAB });
+		await flushBridge();
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: CAPTURE_TAB.tabId,
+				method: "Network.requestWillBeSent",
+				params: {
+					requestId: "r1",
+					documentURL: CAPTURE_TAB.url,
+					request: { method: "GET", url: "http://127.0.0.1:8899/a" },
+				},
+			}),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: CAPTURE_TAB.tabId,
+				method: "Network.responseReceived",
+				params: { requestId: "r1", response: { status: 200, mimeType: "text/html" } },
+			}),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: CAPTURE_TAB.tabId,
+				method: "Network.loadingFinished",
+				params: { requestId: "r1" },
+			}),
+		);
+		ackBridge(bridge, ext, "send", { body: "<html>captured</html>", base64Encoded: false });
+		await flushBridge();
+	}
+
+	it("serves captured records as NDJSON with the dropped header and respects the since cursor", async () => {
+		const port = await findFreeCdpPort();
+		relay = startRelayServer({ port });
+		await populateOneCapture();
+
+		const response = await fetch(`http://127.0.0.1:${port}/captures?since=0`);
+		expect(response.status).toBe(200);
+		expect(response.headers.get("content-type")).toBe("application/x-ndjson");
+		expect(response.headers.get("x-omp-captures-dropped")).toBe("0");
+		const lines = (await response.text()).trim().split("\n").filter(Boolean);
+		expect(lines).toHaveLength(1);
+		const rec = JSON.parse(lines[0]!) as {
+			seq: number;
+			url: string;
+			method: string;
+			status: number;
+			body: string;
+			pageUrl: string;
+		};
+		expect(rec.url).toBe("http://127.0.0.1:8899/a");
+		expect(rec.method).toBe("GET");
+		expect(rec.status).toBe(200);
+		expect(rec.body).toBe("<html>captured</html>");
+		expect(rec.pageUrl).toBe(CAPTURE_TAB.url);
+
+		// Cursor at the drained seq: nothing left to serve.
+		const drained = await fetch(`http://127.0.0.1:${port}/captures?since=${rec.seq}`);
+		expect((await drained.text()).trim()).toBe("");
+
+		// Non-numeric since → 400.
+		const bad = await fetch(`http://127.0.0.1:${port}/captures?since=abc`);
+		expect(bad.status).toBe(400);
 	});
 });

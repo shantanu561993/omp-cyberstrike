@@ -58,23 +58,41 @@ export async function ensureRelayDaemon(opts: { cdpUrl: string; signal?: AbortSi
 	} catch {
 		return false;
 	}
+	logger.debug("browser relay daemon: ensure start", { cdpUrl: opts.cdpUrl, port });
 	// Open the lazy client before probing. Merely caching SocketDaemonClient
 	// would not create the broker connection (and therefore would hold no lease).
 	const client = await daemonClientForGlobal(RELAY_BROKER_SCOPE);
 	throwIfAborted(opts.signal);
 	await client.request({ op: "ping" }, opts.signal);
-	if (await probeRelayServer(opts.cdpUrl)) return true;
+	if (await probeRelayServer(opts.cdpUrl)) {
+		logger.debug("browser relay daemon: already serving", { cdpUrl: opts.cdpUrl });
+		return true;
+	}
 	const spawn = resolveWorkerSpawnCmd("browser-relay");
+	logger.debug("browser relay daemon: nothing serving, will spawn daemon", {
+		cmd: [...spawn.cmd, "--port", port],
+		cwd: spawn.cwd,
+	});
 	for (let attempt = 0; attempt < ENSURE_ATTEMPTS; attempt++) {
 		throwIfAborted(opts.signal);
 		// A manual serve or concurrent global-broker start may have won the
 		// port since the last round; adopt it instead of fighting the bind.
-		if (await probeRelayServer(opts.cdpUrl)) return true;
+		if (await probeRelayServer(opts.cdpUrl)) {
+			logger.debug("browser relay daemon: adopted external server on attempt", { attempt });
+			return true;
+		}
 		const existing = await describeQuietly(client, RELAY_DAEMON_NAME, "Browser relay", opts.signal);
 		if (existing && existing.state !== "exited" && existing.state !== "failed") {
 			if (existing.readyAt === undefined) await waitReady(client, RELAY_DAEMON_NAME, "Browser relay", opts.signal);
-			if (await probeRelayServer(opts.cdpUrl)) return true;
+			if (await probeRelayServer(opts.cdpUrl)) {
+				logger.debug("browser relay daemon: existing daemon serving", { attempt, state: existing.state });
+				return true;
+			}
 			// Live record but nothing listening: replace the wedged daemon.
+			logger.warn("browser relay daemon: record live but not listening — replacing wedged daemon", {
+				attempt,
+				state: existing.state,
+			});
 			await stopQuietly(client, RELAY_DAEMON_NAME, "Browser relay", opts.signal);
 			continue;
 		}
@@ -97,11 +115,19 @@ export async function ensureRelayDaemon(opts: { cdpUrl: string; signal?: AbortSi
 				},
 				opts.signal,
 			);
-			if (started.op !== "start") continue;
-			if (await probeRelayServer(opts.cdpUrl)) return true;
+			if (started.op !== "start") {
+				logger.debug("browser relay daemon: start request not accepted", { attempt, op: started.op });
+				continue;
+			}
+			if (await probeRelayServer(opts.cdpUrl)) {
+				logger.debug("browser relay daemon: started and serving", { attempt, port });
+				return true;
+			}
+			logger.warn("browser relay daemon: started but not answering — stopping", { attempt, port });
 			await stopQuietly(client, RELAY_DAEMON_NAME, "Browser relay", opts.signal);
 		} catch (error) {
 			throwIfAborted(opts.signal);
+
 			// Lost a cross-process start race; the next round adopts the winner.
 			logger.debug("Browser relay start contention", {
 				name: RELAY_DAEMON_NAME,
@@ -109,5 +135,6 @@ export async function ensureRelayDaemon(opts: { cdpUrl: string; signal?: AbortSi
 			});
 		}
 	}
+	logger.warn("browser relay daemon: ensure failed after attempts", { port, attempts: ENSURE_ATTEMPTS });
 	return false;
 }

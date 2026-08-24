@@ -1,5 +1,6 @@
 import * as net from "node:net";
 import { Process, ProcessStatus } from "@oh-my-pi/pi-natives";
+import { logger } from "@oh-my-pi/pi-utils";
 import type { Socket } from "bun";
 import type { Browser, Page } from "puppeteer-core";
 import { ToolError, throwIfAborted } from "../tool-errors";
@@ -109,7 +110,14 @@ export async function waitForCdp(cdpUrl: string, timeoutMs: number, signal?: Abo
 	while (Date.now() < deadline) {
 		throwIfAborted(signal);
 		const status = await probeCdpStatus(probeUrl, { timeoutMs: 2000, signal });
-		if (status !== null && status >= 200 && status < 300) return;
+		if (status !== null && status >= 200 && status < 300) {
+			logger.debug("waitForCdp: endpoint ready", {
+				cdpUrl,
+				status,
+				elapsedMs: Date.now() - (deadline - timeoutMs),
+			});
+			return;
+		}
 		lastStatus = status;
 		await Bun.sleep(150);
 	}

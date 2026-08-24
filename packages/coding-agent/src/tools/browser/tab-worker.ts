@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { postmortem, Snowflake, untilAborted, withTimeout } from "@oh-my-pi/pi-utils";
+import { logger, postmortem, Snowflake, untilAborted, withTimeout } from "@oh-my-pi/pi-utils";
 import type { HTMLElement } from "@oh-my-pi/pi-utils/dom";
 import type {
 	Browser,
@@ -879,11 +879,17 @@ export class WorkerCore {
 				await applyViewport(this.#page, payload.viewport);
 				if (payload.dialogs) this.#applyDialogPolicy(payload.dialogs);
 				if (payload.url) {
+					logger.debug("tab-worker init: goto (headless)", {
+						url: payload.url,
+						waitUntil: payload.waitUntil ?? "load",
+						timeoutMs: payload.timeoutMs,
+					});
 					await this.#page.goto(payload.url, {
 						// Default to "load" because dev servers with HMR/WS never reach networkidle.
 						waitUntil: payload.waitUntil ?? "load",
 						timeout: payload.timeoutMs,
 					});
+					logger.debug("tab-worker init: goto done (headless)", { url: this.#page.url() });
 				}
 			} else {
 				const target = await this.#findAttachedTarget(payload.targetId);
@@ -898,11 +904,18 @@ export class WorkerCore {
 				this.#observeDialogs();
 				if (payload.dialogs) this.#applyDialogPolicy(payload.dialogs);
 				if (payload.url) {
+					logger.debug("tab-worker init: goto (connected/relay)", {
+						url: payload.url,
+						waitUntil: payload.waitUntil ?? "load",
+						timeoutMs: payload.timeoutMs,
+						targetId: payload.targetId,
+					});
 					await this.#page.goto(payload.url, {
 						// Same default as the headless arm: dev servers with HMR/WS never reach networkidle.
 						waitUntil: payload.waitUntil ?? "load",
 						timeout: payload.timeoutMs,
 					});
+					logger.debug("tab-worker init: goto done (connected/relay)", { url: this.#page.url() });
 				}
 			}
 			this.#targetId = await targetIdForPage(this.#page);
@@ -1362,13 +1375,23 @@ export class WorkerCore {
 				op(`tab.goto(${JSON.stringify(url)})`, INF, async sig => {
 					this.#clearElementCache();
 					try {
+						logger.debug("tab-worker: goto", {
+							url,
+							waitUntil: opts?.waitUntil ?? "load",
+							timeoutMs: budgetBound,
+						});
 						// Default to "load" because dev servers with HMR/WS never reach networkidle.
 						// budgetBound (not the full cell) so a hung navigation fails named and
 						// catchable inside the run instead of dying with the whole cell.
 						await untilAborted(sig, () =>
 							page.goto(url, { waitUntil: opts?.waitUntil ?? "load", timeout: budgetBound }),
 						);
+						logger.debug("tab-worker: goto done", { url, finalUrl: page.url() });
 					} catch (err) {
+						logger.warn("tab-worker: goto failed", {
+							url,
+							error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+						});
 						if (err instanceof Error && err.name === "TimeoutError") {
 							// Abandon the hung navigation NOW — a still-pending load stalls every
 							// later op on this page and cascades into more opaque timeouts.

@@ -280,3 +280,229 @@ describe("RelayBridge tab grouping", () => {
 		expect(groups[0]!.tabIds).toEqual([1]);
 	});
 });
+describe("RelayBridge traffic capture", () => {
+	it("captures a claimed tab's request→response→finished lifecycle and ignores unclaimed tabs and data: URLs", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 }), tab({ tabId: 2, url: "http://127.0.0.1:8899/" })]);
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		// Claim tab 1 via Target.createTarget; tab 2 stays unclaimed.
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: ++msgSeq, method: "Target.createTarget", params: { url: "http://127.0.0.1:8899/" } }),
+		);
+		ack(bridge, ext, "createTab", { tab: tab({ tabId: 1, url: "http://127.0.0.1:8899/" }) });
+		await flush();
+
+		// Tab 1 (claimed): full lifecycle with a POST body and an HTML response.
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: 1,
+				method: "Network.requestWillBeSent",
+				params: {
+					requestId: "r1",
+					documentURL: "http://127.0.0.1:8899/",
+					request: { method: "POST", url: "http://127.0.0.1:8899/a", postData: "q=1" },
+				},
+			}),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: 1,
+				method: "Network.responseReceived",
+				params: { requestId: "r1", response: { status: 200, mimeType: "text/html" } },
+			}),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 1, method: "Network.loadingFinished", params: { requestId: "r1" } }),
+		);
+		ack(bridge, ext, "send", { body: "<html>captured</html>", base64Encoded: false });
+		await flush();
+
+		// Tab 2 (unclaimed): the same lifecycle must produce no records.
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: 2,
+				method: "Network.requestWillBeSent",
+				params: {
+					requestId: "r2",
+					documentURL: "http://127.0.0.1:8899/",
+					request: { method: "GET", url: "http://127.0.0.1:8899/b" },
+				},
+			}),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: 2,
+				method: "Network.responseReceived",
+				params: { requestId: "r2", response: { status: 200, mimeType: "text/html" } },
+			}),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 2, method: "Network.loadingFinished", params: { requestId: "r2" } }),
+		);
+		await flush();
+
+		// A data: URL on a claimed tab is skipped entirely.
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: 1,
+				method: "Network.requestWillBeSent",
+				params: {
+					requestId: "r3",
+					documentURL: "http://127.0.0.1:8899/",
+					request: { method: "GET", url: "data:text/html,<b>x</b>" },
+				},
+			}),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 1, method: "Network.loadingFinished", params: { requestId: "r3" } }),
+		);
+		await flush();
+
+		const { records, dropped } = bridge.captureRecords(0);
+		expect(dropped).toBe(0);
+		expect(records).toHaveLength(1);
+		const rec = records[0]!;
+		expect(rec.seq).toBe(1);
+		expect(rec.url).toBe("http://127.0.0.1:8899/a");
+		expect(rec.method).toBe("POST");
+		expect(rec.status).toBe(200);
+		expect(rec.requestBody).toBe("q=1");
+		expect(rec.body).toBe("<html>captured</html>");
+		expect(rec.pageUrl).toBe("http://127.0.0.1:8899/");
+	});
+
+	it("base64-decodes getResponseBody payloads", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1, url: "http://127.0.0.1:8899/" })]);
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: ++msgSeq, method: "Target.createTarget", params: { url: "http://127.0.0.1:8899/" } }),
+		);
+		ack(bridge, ext, "createTab", { tab: tab({ tabId: 1, url: "http://127.0.0.1:8899/" }) });
+		await flush();
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: 1,
+				method: "Network.requestWillBeSent",
+				params: {
+					requestId: "r1",
+					documentURL: "http://127.0.0.1:8899/",
+					request: { method: "GET", url: "http://127.0.0.1:8899/x" },
+				},
+			}),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: 1,
+				method: "Network.responseReceived",
+				params: { requestId: "r1", response: { status: 200, mimeType: "application/json" } },
+			}),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 1, method: "Network.loadingFinished", params: { requestId: "r1" } }),
+		);
+		ack(bridge, ext, "send", { body: Buffer.from('{"ok":true}').toString("base64"), base64Encoded: true });
+		await flush();
+		const { records } = bridge.captureRecords(0);
+		expect(records).toHaveLength(1);
+		expect(records[0]!.body).toBe('{"ok":true}');
+	});
+
+	it("skips non-text 2xx responses without calling getResponseBody, but captures error responses", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1, url: "http://127.0.0.1:8899/" })]);
+		const cdp = new FakeCdpSocket();
+		const connId = bridge.cdpConnected(cdp);
+		bridge.cdpMessage(
+			connId,
+			JSON.stringify({ id: ++msgSeq, method: "Target.createTarget", params: { url: "http://127.0.0.1:8899/" } }),
+		);
+		ack(bridge, ext, "createTab", { tab: tab({ tabId: 1, url: "http://127.0.0.1:8899/" }) });
+		await flush();
+		// PNG with status 200: not body-eligible → no getResponseBody RPC.
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: 1,
+				method: "Network.requestWillBeSent",
+				params: {
+					requestId: "r1",
+					documentURL: "http://127.0.0.1:8899/",
+					request: { method: "GET", url: "http://127.0.0.1:8899/pic.png" },
+				},
+			}),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: 1,
+				method: "Network.responseReceived",
+				params: { requestId: "r1", response: { status: 200, mimeType: "image/png" } },
+			}),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 1, method: "Network.loadingFinished", params: { requestId: "r1" } }),
+		);
+		// Error response with the same binary mime: captured (status >= 400 wins).
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: 1,
+				method: "Network.requestWillBeSent",
+				params: {
+					requestId: "r2",
+					documentURL: "http://127.0.0.1:8899/",
+					request: { method: "GET", url: "http://127.0.0.1:8899/err.png" },
+				},
+			}),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: 1,
+				method: "Network.responseReceived",
+				params: { requestId: "r2", response: { status: 500, mimeType: "image/png" } },
+			}),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 1, method: "Network.loadingFinished", params: { requestId: "r2" } }),
+		);
+		ack(bridge, ext, "send", { body: "boom", base64Encoded: false });
+		await flush();
+		const { records } = bridge.captureRecords(0);
+		expect(records).toHaveLength(1);
+		expect(records[0]!.url).toBe("http://127.0.0.1:8899/err.png");
+		expect(records[0]!.status).toBe(500);
+	});
+});

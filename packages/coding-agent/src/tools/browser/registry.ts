@@ -222,14 +222,20 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
 		if (isLoopbackRelayUrl(cdpUrl) && (isCompiledBinary() || workerHostEntry() !== null)) {
 			autoStarted = await ensureRelayDaemon({ cdpUrl, signal: opts.signal });
 		}
+		logger.debug("browser tool: relay connect", { cdpUrl, autoStarted, loopback: isLoopbackRelayUrl(cdpUrl) });
 		// The relay answers /json/version with 503 until its extension dials in.
 		// A freshly revived extension service worker can take up to ~30s (its
 		// keepalive alarm) to reconnect, so give the handshake that long.
 		try {
 			await waitForCdp(cdpUrl, RELAY_EXTENSION_WAIT_MS, opts.signal);
+			logger.debug("browser tool: relay handshake passed", { cdpUrl });
 		} catch (err) {
 			if (err instanceof ToolAbortError) throw err;
 			if (err instanceof Error && err.name === "AbortError") throw err;
+			logger.warn("browser tool: relay handshake failed", {
+				cdpUrl,
+				error: err instanceof Error ? err.message : String(err),
+			});
 			throw new ToolError(
 				autoStarted
 					? `omp browser relay is serving at ${cdpUrl} but its extension never connected. Install it with \`omp browser-relay install\` and check the toolbar badge shows "on".`
@@ -237,11 +243,21 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
 			);
 		}
 		const puppeteer = await loadPuppeteer();
-		const browser = await puppeteer.connect({
-			browserURL: cdpUrl,
-			defaultViewport: null,
-			protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
-		});
+		let browser: Browser;
+		try {
+			browser = await puppeteer.connect({
+				browserURL: cdpUrl,
+				defaultViewport: null,
+				protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
+			});
+		} catch (error) {
+			logger.warn("browser tool: puppeteer.connect to relay failed", {
+				cdpUrl,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			throw error;
+		}
+		logger.debug("browser tool: puppeteer connected to relay", { cdpUrl });
 		return {
 			key: browserKey(kind),
 			kind,

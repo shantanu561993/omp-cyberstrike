@@ -12,6 +12,8 @@
  * Binds loopback only: anything that can reach this port can drive the
  * user's logged-in browser.
  */
+
+import { logger } from "@oh-my-pi/pi-utils";
 import { RelayBridge } from "./bridge";
 
 /** Options for {@link startRelayServer}. */
@@ -55,7 +57,14 @@ function isWsAuthority(raw: string): boolean {
 }
 /** Start the relay server on 127.0.0.1. Throws if the port is taken. */
 export function startRelayServer(opts: RelayServerOptions): RelayServer {
-	const log = opts.log ?? (() => {});
+	// Relay lifecycle events (extension connect, cdp client connect/close, tab
+	// claimed/detached, attach failures, group ops) land in the process log at
+	// debug level unless the caller supplied a richer logger — without this the
+	// relay is silent during a /pentest run and navigation failures are
+	// invisible.
+	const log =
+		opts.log ??
+		((message: string, data?: Record<string, unknown>) => logger.debug(`browser relay: ${message}`, data));
 	const group =
 		opts.group === false ? null : opts.group === true || opts.group === undefined ? DEFAULT_GROUP : opts.group;
 	const bridge = new RelayBridge({ log, group });
@@ -101,8 +110,19 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
 				}
 				return Response.json(bridge.versionInfo(`ws://${host}/cdp`));
 			}
-			if (path === "/json" || path === "/json/list") {
-				return Response.json(bridge.listTargets());
+			if (path === "/captures") {
+				const sinceRaw = url.searchParams.get("since");
+				const since = sinceRaw === null ? 0 : Number.parseInt(sinceRaw, 10);
+				if (!Number.isInteger(since) || since < 0) {
+					return Response.json({ error: "since must be a non-negative integer" }, { status: 400 });
+				}
+				const { records, dropped } = bridge.captureRecords(since);
+				return new Response(records.map(record => JSON.stringify(record)).join("\n"), {
+					headers: {
+						"content-type": "application/x-ndjson",
+						"x-omp-captures-dropped": String(dropped),
+					},
+				});
 			}
 			return new Response("Not found", { status: 404 });
 		},

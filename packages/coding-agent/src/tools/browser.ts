@@ -1,7 +1,7 @@
 import { type } from "@oh-my-pi/omptype";
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import type { ToolExample } from "@oh-my-pi/pi-ai";
-import { prompt, untilAborted } from "@oh-my-pi/pi-utils";
+import { logger, prompt, untilAborted } from "@oh-my-pi/pi-utils";
 import browserDescription from "../prompts/tools/browser.md" with { type: "text" };
 import type { ToolSession } from "../sdk";
 import { enforceInlineByteCap } from "../session/streaming-output";
@@ -15,6 +15,7 @@ import {
 	holdBrowser,
 	releaseBrowser,
 } from "./browser/registry";
+import { drainRelayCaptures } from "./browser/relay/captures";
 import { resolveRelayKind } from "./browser/relay/kind";
 import type { Observation, ScreenshotResult } from "./browser/tab-protocol";
 import {
@@ -71,6 +72,9 @@ const browserSchema = type({
 	"timeout?": type("number").describe("timeout in seconds"),
 	"all?": type("boolean").describe("release every managed tab"),
 	"kill?": type("boolean").describe("also kill spawned-app browsers"),
+	"out?": type("string").describe(
+		"pentest out dir; with a relay browser, captured traffic auto-logs to <out>/requests.jsonl + <out>/http.log",
+	),
 });
 
 /** Input schema for the browser tool. */
@@ -235,16 +239,34 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 			const name = params.name ?? DEFAULT_TAB_NAME;
 			const details: BrowserToolDetails = { action: params.action, name };
 
+			const kind = resolveBrowserKind(params, this.session);
+			let result: AgentToolResult<BrowserToolDetails>;
 			switch (params.action) {
 				case "open":
-					return await this.#open(name, params, details, timeoutMs, signal);
+					result = await this.#open(name, params, details, timeoutMs, signal);
+					break;
 				case "close":
-					return await this.#close(name, params, details, timeoutMs, signal);
+					result = await this.#close(name, params, details, timeoutMs, signal);
+					break;
 				case "run":
-					return await this.#run(name, params, details, timeoutMs, signal);
+					result = await this.#run(name, params, details, timeoutMs, signal);
+					break;
 				default:
 					throw new ToolError(`Unsupported action: ${(params as BrowserParams).action}`);
 			}
+			if (params.out && kind.kind === "relay") {
+				// Traffic capture is best-effort: a drain failure must never
+				// mask the action result (the ring keeps records for the next call).
+				try {
+					const { appended } = await drainRelayCaptures(params.out, kind.cdpUrl, { log: logger.debug });
+					logger.debug("relay capture drained", { appended });
+				} catch (err) {
+					logger.debug("relay capture drain failed", {
+						error: err instanceof Error ? err.message : String(err),
+					});
+				}
+			}
+			return result;
 		} catch (error) {
 			if (error instanceof ToolAbortError) throw error;
 			if (error instanceof Error && error.name === "AbortError") {
