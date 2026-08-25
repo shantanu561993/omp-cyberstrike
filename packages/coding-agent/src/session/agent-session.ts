@@ -252,6 +252,7 @@ import type {
 	SessionStats,
 	UsageFallbackConfirmer,
 } from "./agent-session-types";
+import { writeArtifact } from "./artifacts";
 import {
 	ASYNC_INLINE_RESULT_MAX_CHARS,
 	ASYNC_PREVIEW_MAX_CHARS,
@@ -526,6 +527,8 @@ export class AgentSession {
 	#goalModeState: GoalModeState | undefined;
 	#goalRuntime: GoalRuntime;
 	readonly #advisors: SessionAdvisors;
+	/** Resolves once the resume-time advisor spend backfill settles (issue #9553). */
+	#advisorCostRestore: Promise<void> = Promise.resolve();
 	#goalTurnCounter = 0;
 	#planReferenceSent = false;
 	#planReferencePath = "local://PLAN.md";
@@ -674,6 +677,8 @@ export class AgentSession {
 	// Cursor exec, TUI listeners) is held back. Without this, a client that resumes
 	// on `agent_end` can fire its next `prompt` before #promptWithMessage's finally
 	#promptGeneration = 0;
+	#promptSequence = 0;
+	#skippedPostTurnSpeculationCompletion: Promise<void> | undefined;
 	#pendingAgentEndEmit: AgentSessionEvent | undefined;
 	#inFlightSettledCallbacks: Array<() => void | Promise<void>> = [];
 	#sessionStopContinuationCount = 0;
@@ -1553,7 +1558,6 @@ export class AgentSession {
 			configs: config.advisorConfigs,
 			streamFn: config.advisorStreamFn,
 			transformProviderContext: config.transformProviderContext,
-			initialCosts: config.initialAdvisorCosts,
 		});
 
 		const maintenanceHost: SessionMaintenanceHost = {
@@ -1632,6 +1636,7 @@ export class AgentSession {
 			baseSystemPrompt: () => this.#tools.baseSystemPrompt,
 			setSkipPostTurnMaintenance: timestamp => {
 				this.#maintenance.skipPostTurnMaintenanceAssistantTimestamp = timestamp;
+				if (timestamp === undefined) this.#skippedPostTurnSpeculationCompletion = undefined;
 			},
 			obfuscateTextForProvider: text => this.#obfuscateTextForProvider(text),
 			deobfuscateFromProvider: text => this.#deobfuscateFromProvider(text),
@@ -1951,9 +1956,9 @@ export class AgentSession {
 
 	/**
 	 * Delivery sink for async jobs owned by this agent: format the result
-	 * (spilling oversized output to an artifact) and enqueue it as an
-	 * async-result follow-up on the yield queue. The queue's idle flush starts
-	 * the follow-up turn when the session is between turns.
+	 * (spilling oversized output to an artifact), enqueue it as an async-result
+	 * follow-up, and settle only after the yield queue injects or discards it.
+	 * This keeps the job body recoverable through `hub` while injection is pending.
 	 */
 	async #deliverAsyncJobResult(manager: AsyncJobManager, jobId: string, text: string, job?: AsyncJob): Promise<void> {
 		if (this.#isDisposed) return;
@@ -1968,7 +1973,13 @@ export class AgentSession {
 		if (epoch !== this.#asyncDeliveryEpoch) return;
 		if (manager.isDeliverySuppressed(jobId)) return;
 		const durationMs = job ? Math.max(0, Date.now() - job.startTime) : undefined;
-		this.yieldQueue.enqueue<AsyncResultEntry>("async-result", { jobId, result: formatted, job, durationMs, epoch });
+		await this.yieldQueue.enqueueWithReceipt<AsyncResultEntry>("async-result", {
+			jobId,
+			result: formatted,
+			job,
+			durationMs,
+			epoch,
+		});
 	}
 
 	async #formatAsyncResultForFollowUp(result: string): Promise<string> {
@@ -1979,7 +1990,7 @@ export class AgentSession {
 		try {
 			const { path: artifactPath, id: artifactId } = await this.sessionManager.allocateArtifactPath("async");
 			if (artifactPath && artifactId) {
-				await Bun.write(artifactPath, result);
+				await writeArtifact(artifactPath, result);
 				return `${preview}\nFull output: artifact://${artifactId}`;
 			}
 		} catch (error) {
@@ -2595,16 +2606,20 @@ export class AgentSession {
 		if (event.type === "message_end" && event.message.role === "assistant") {
 			this.#lastAssistantMessage = event.message;
 		}
-		// Plan-mode internal transition: stamp `SILENT_ABORT_MARKER` on the
-		// persisted message BEFORE the obfuscator's display-side copy below.
+		// Expected internal transitions stamp a structural suppression flag on the
+		// persisted message BEFORE the obfuscator's display-side copy below, so the
+		// streaming render and every history-replay path (resume, `/tree`, rebuild)
+		// branch identically through `shouldRenderAbortReason`.
 		// Invariant (must hold across refactors): this branch precedes the
 		// `let displayEvent = event; ... displayEvent = { ...event, message: { ...message, content: deobfuscated } }`
 		// block. After stamping, both `displayEvent.message` (via the spread)
 		// and `event.message` (in-place mutation, used by SessionManager
-		// persistence) carry the marker, guaranteeing streaming render and
-		// history replay branch identically. The one-shot flag is consumed
-		// here, scoped strictly to this aborted message_end; callers still clear it
-		// in `finally` so a leaked flag cannot silence a later unrelated abort.
+		// persistence) carry the flag. The one-shot plan flag is consumed here,
+		// scoped strictly to this aborted message_end; callers still clear it in
+		// `finally` so a leaked flag cannot silence a later unrelated abort. TTSR
+		// keys off the coordinator's live `abortPending` state instead of a
+		// one-shot flag: the aborted message_end always fires before the deferred
+		// retry clears it.
 		if (
 			event.type === "message_end" &&
 			event.message.role === "assistant" &&
@@ -2618,6 +2633,13 @@ export class AgentSession {
 			} else if (this.#pendingAbortErrorId) {
 				message.errorId = this.#pendingAbortErrorId;
 				this.#pendingAbortErrorId = undefined;
+			} else if (this.#ttsr.abortPending) {
+				// A TTSR rule interruption is control flow, not a failure: the turn
+				// re-runs and the injection surfaces via `TtsrNotificationComponent`.
+				// Suppress the abort line while keeping the rule reason on the
+				// message for transcript/debug (the structural flag drives
+				// suppression, not the text).
+				message.errorId = AIError.create(AIError.Flag.SilentAbort);
 			}
 		}
 
@@ -2806,6 +2828,7 @@ export class AgentSession {
 				this.#ttsr.onAssistantMessageEnd(assistantMsg);
 				if (this.#handoff.isGeneratingHandoff) {
 					this.#maintenance.skipPostTurnMaintenanceAssistantTimestamp = assistantMsg.timestamp;
+					this.#skippedPostTurnSpeculationCompletion = this.#maintenance.speculationCompletion;
 				}
 				await this.#recovery.onAssistantSettledSuccessfully(assistantMsg);
 				// Broker deployments: report this request's burn so the broker can
@@ -2983,11 +3006,39 @@ export class AgentSession {
 			}
 
 			if (this.#maintenance.skipPostTurnMaintenanceAssistantTimestamp === msg.timestamp) {
+				const skippedSpeculationCompletion = this.#skippedPostTurnSpeculationCompletion;
 				this.#maintenance.skipPostTurnMaintenanceAssistantTimestamp = undefined;
+				this.#skippedPostTurnSpeculationCompletion = undefined;
 				this.#lastSuccessfulYieldToolCallId = undefined;
-				maintenanceRoute("skip-post-turn-maintenance");
-				await emitAgentEndNotification();
-				return;
+				const model = this.model;
+				const requiresSpeculativeRecovery =
+					model !== undefined &&
+					msg.provider === model.provider &&
+					msg.model === model.id &&
+					(msg.stopReason === "length" ||
+						(msg.stopReason === "error" && AIError.isContextOverflow(msg, model.contextWindow ?? 0)));
+				const speculationCompletion = requiresSpeculativeRecovery ? skippedSpeculationCompletion : undefined;
+				if (!speculationCompletion) {
+					maintenanceRoute("skip-post-turn-maintenance");
+					await emitAgentEndNotification();
+					return;
+				}
+
+				const promptSequence = this.#promptSequence;
+				const promptGeneration = this.#promptGeneration;
+				maintenanceRoute("await-speculative-compaction");
+				await speculationCompletion;
+				if (
+					this.#isDisposed ||
+					this.#abortInProgress ||
+					this.#promptGeneration !== promptGeneration ||
+					this.#promptSequence !== promptSequence
+				) {
+					maintenanceRoute("skip-superseded-speculative-maintenance");
+					await emitAgentEndNotification();
+					return;
+				}
+				maintenanceRoute("resume-post-turn-maintenance");
 			}
 
 			const activeGoal = this.#goalModeState?.enabled === true && this.#goalModeState.goal.status === "active";
@@ -5761,6 +5812,7 @@ export class AgentSession {
 		// the typed text back to the host instead of losing it.
 		this.#beginInFlight();
 		const generation = this.#promptGeneration;
+		this.#promptSequence++;
 		try {
 			await this.#recovery.maybeRestoreRetryFallbackPrimary();
 			if (!(await this.#runUsageAwarePreflightForNextModelCall())) return false;
@@ -9719,6 +9771,55 @@ export class AgentSession {
 	/** Return cumulative cost recorded for the current session's advisor activity. */
 	getAdvisorCost(): number {
 		return this.#advisors.getAdvisorCost();
+	}
+
+	/**
+	 * Begin backfilling advisor spend recorded before this resume, off the
+	 * critical path (issue #9553). A large advisor transcript would otherwise
+	 * block session startup for tens of seconds while the whole file is streamed
+	 * and parsed; instead the status-line total hydrates once the scan settles.
+	 * The resulting promise is exposed via {@link advisorCostRestore} for tests
+	 * and headless callers that must observe the hydrated total.
+	 */
+	beginInitialAdvisorCostRestore(): void {
+		let stale = false;
+		const unregisterSessionChange = this.registerSessionChangeCallback(() => {
+			stale = true;
+		});
+		const snapshot = this.#advisors.beginCostRestoreSnapshot();
+		this.#advisorCostRestore = loadAdvisorTranscriptCosts(this.sessionFile, {
+			beforeSnapshot: snapshot.ready,
+			onSnapshot: snapshot.release,
+			shouldContinue: () => !stale && !this.isDisposed,
+		})
+			.then(costs => {
+				if (stale || this.isDisposed) return;
+				this.restoreInitialAdvisorCosts(costs, snapshot.costsAtSnapshot);
+				this.#emit({ type: "advisor_cost_changed" });
+			})
+			.catch(err => logger.debug("advisor cost restore failed", { err: String(err) }))
+			.finally(() => {
+				snapshot.release();
+				unregisterSessionChange();
+			});
+	}
+
+	/** Resolves once {@link beginInitialAdvisorCostRestore}'s scan has settled. */
+	get advisorCostRestore(): Promise<void> {
+		return this.#advisorCostRestore;
+	}
+
+	/**
+	 * Restore persisted advisor spend plus the process-local delta billed after
+	 * `costsAtSnapshot`. The recorder barrier fixes every transcript's byte length
+	 * after capturing that baseline, so a turn completed while the scan runs is added
+	 * exactly once.
+	 */
+	restoreInitialAdvisorCosts(
+		costs: ReadonlyMap<string, number>,
+		costsAtSnapshot: ReadonlyMap<string, number> = new Map(),
+	): void {
+		this.#advisors.restoreInitialCost(costs, costsAtSnapshot);
 	}
 	/** Return whether any active or configured advisor is running on an OAuth/subscription model. */
 	isAdvisorUsingSubscription(): boolean {
