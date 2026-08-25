@@ -43,7 +43,7 @@ function todoPhase(name: string): TodoPhase {
 	return { name, tasks: [{ content: name, status: "pending" }] };
 }
 
-describe("methodology tool todo mirroring", () => {
+describe("methodology tool does not touch the session todo list", () => {
 	const tmpDirs: string[] = [];
 
 	afterEach(async () => {
@@ -68,72 +68,31 @@ describe("methodology tool todo mirroring", () => {
 		}
 	}
 
-	it("methodology complete marks the matching todo phase done and persists it", async () => {
+	it("start/complete leave the todo list and todo entries untouched", async () => {
 		const { tool, out, phases, entries } = await makeTool([todoPhase("input_validation")]);
 		await completeChain(tool, out, INPUT_VALIDATION_CHAIN.slice(0, -1));
 
-		const result = await tool.execute("test", { action: "complete", phase: "input_validation", out });
-		const text = resultText(result);
-		expect(text).toContain("phase 'input_validation' completed");
-		expect(text).toContain("; todo 'input_validation' done");
-
-		expect(phases()[0].tasks[0].status).toBe("completed");
-		expect(entries).toHaveLength(1);
-		const entry = entries[0] as { phases: TodoPhase[] };
-		expect(entry.phases[0].tasks[0].status).toBe("completed");
-	});
-
-	it("methodology start marks the matching todo task in_progress", async () => {
-		const { tool, out, phases, entries } = await makeTool([todoPhase("input_validation")]);
-		await completeChain(tool, out, INPUT_VALIDATION_CHAIN.slice(0, 4));
-
 		const result = await tool.execute("test", { action: "start", phase: "input_validation", out });
-		const text = resultText(result);
-		expect(text).toContain("phase 'input_validation' started");
-		expect(text).toContain("; todo 'input_validation' in_progress");
+		expect(resultText(result)).toContain("phase 'input_validation' started");
+		expect(resultText(result)).not.toContain("todo");
 
-		expect(phases()[0].tasks[0].status).toBe("in_progress");
-		expect(entries).toHaveLength(1);
-		const entry = entries[0] as { phases: TodoPhase[] };
-		expect(entry.phases[0].tasks[0].status).toBe("in_progress");
-	});
-
-	it("methodology status self-heals a desynced todo list", async () => {
-		const names = ["scope_analysis", "passive_recon", "active_recon", "technology_profiling"];
-		const { tool, out, session, phases, entries } = await makeTool(names.map(todoPhase));
-		await completeChain(tool, out, names);
-
-		// Desync: the session store is reset to all-pending while methodology.json
-		// stays done — the next `status` must re-mirror the persisted state.
-		session.setTodoPhases?.(names.map(todoPhase));
-
-		const result = await tool.execute("test", { action: "status", out });
-		expect(resultText(result)).toContain("(todo reconciled: 4 task(s) updated to match methodology)");
-		expect(phases().map(phase => phase.tasks[0].status)).toEqual([
-			"completed",
-			"completed",
-			"completed",
-			"completed",
-		]);
-		const entry = entries[entries.length - 1] as { phases: TodoPhase[] };
-		expect(entry.phases.every(phase => phase.tasks[0].status === "completed")).toBe(true);
-	});
-
-	it("unknown todo phase is a silent no-op", async () => {
-		// `sweep` has no methodology equivalent — completing a methodology phase
-		// must not touch it and must not create a persisted entry.
-		const { tool, out, phases, entries } = await makeTool([todoPhase("sweep")]);
-
-		const result = await tool.execute("test", { action: "complete", phase: "scope_analysis", out });
-		const text = resultText(result);
-		expect(text).toContain("phase 'scope_analysis' completed");
-		expect(text).not.toContain("; todo");
+		await tool.execute("test", { action: "complete", phase: "input_validation", out });
 		expect(phases()[0].tasks[0].status).toBe("pending");
 		expect(entries).toHaveLength(0);
 	});
 
-	it("missing todo storage is a silent no-op", async () => {
-		// Session without getTodoPhases/sessionManager: no mirroring, no error.
+	it("status writes no todo entries", async () => {
+		const names = ["scope_analysis", "passive_recon", "active_recon", "technology_profiling"];
+		const { tool, out, phases, entries } = await makeTool(names.map(todoPhase));
+		await completeChain(tool, out, names);
+
+		const result = await tool.execute("test", { action: "status", out });
+		expect(resultText(result)).not.toContain("reconciled");
+		expect(phases().every(p => p.tasks[0].status === "pending")).toBe(true);
+		expect(entries).toHaveLength(0);
+	});
+
+	it("missing todo storage still completes phases (no todo write attempted)", async () => {
 		const session = { cwd: "/tmp" } as unknown as ToolSession;
 		const out = await fs.mkdtemp(path.join(os.tmpdir(), "omp-pentest-methodology-"));
 		tmpDirs.push(out);
@@ -141,6 +100,7 @@ describe("methodology tool todo mirroring", () => {
 		await tool.execute("test", { action: "init", target: "https://example.com", out });
 
 		const result = await tool.execute("test", { action: "complete", phase: "scope_analysis", out });
-		expect(resultText(result)).not.toContain("; todo");
+		expect(resultText(result)).toContain("phase 'scope_analysis' completed");
+		expect(resultText(result)).not.toContain("todo");
 	});
 });
