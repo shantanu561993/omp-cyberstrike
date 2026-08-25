@@ -4219,6 +4219,16 @@ export const SETTINGS_SCHEMA = {
 			description: "Enable the debug tool for DAP-based debugging",
 		},
 	},
+	"debug.sessionTrace": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			group: "Available Tools",
+			label: "Debug Session Trace",
+			description: "Write the debug session trace + raw provider SSE (default on). Off stops debug log writes.",
+		},
+	},
 
 	"launch.enabled": {
 		type: "boolean",

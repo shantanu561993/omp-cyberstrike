@@ -16,6 +16,7 @@
 ### Changed
 
 - Standardized completed edit results on hashline-style path and numbered-preview output across edit modes.
+- The debug session trace now runs by default; pentest `methodology init` writes it and the rotating logger into `<out>/debug`, and `debug.sessionTrace: false` (or `PI_DEBUG_SESSION_LOG=0`) turns the trace off.
 - Made `omp git` stream file contents into an off-thread native differ, paint complete lines immediately, progressively apply syntax highlighting, and defer large commit file statistics until after the first interactive frame.
 - Added `r` shortcut to refresh the git state
 - Added `s`/`u` shortcuts to stage/unstage files directly from the sidebar

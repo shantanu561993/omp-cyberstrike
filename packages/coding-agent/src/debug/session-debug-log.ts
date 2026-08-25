@@ -23,13 +23,30 @@ import type { AgentSessionEvent } from "../session/agent-session-events";
 /** Longest single serialized field (thinking block, tool args, result text). */
 const MAX_FIELD_CHARS = 16_000;
 
-/** True on any build when the env var is set; always true in debug binaries. */
-export function sessionDebugLogEnabled(): boolean {
-	return process.env.PI_DEBUG_SESSION_LOG === "1" || process.env.PI_DEBUG_BUILD === "1";
+/** Runtime flag applied from the `debug.sessionTrace` setting; `undefined` leaves the default (on). */
+let sessionTraceEnabled: boolean | undefined;
+
+/** Apply the `debug.sessionTrace` setting at runtime; `undefined` leaves the default (on). */
+export function setSessionTraceEnabled(enabled: boolean): void {
+	sessionTraceEnabled = enabled;
 }
 
-function debugLogDir(): string {
-	return path.join(getLogsDir(), "debug");
+/** True unless the env hard-off is set or the `debug.sessionTrace` setting is off. */
+export function sessionDebugLogEnabled(): boolean {
+	if (process.env.PI_DEBUG_SESSION_LOG === "0") return false; // hard-off
+	return sessionTraceEnabled ?? true; // default ON
+}
+
+/** Engagement-scoped log dir override; `undefined` restores the global default. */
+let debugDirOverride: string | undefined;
+
+export function debugLogDir(): string {
+	return debugDirOverride ?? path.join(getLogsDir(), "debug");
+}
+
+/** Redirect the session-trace log dir to the pentest engagement `<out>/debug`. `undefined` restores default. */
+export function setDebugLogDir(dir: string | undefined): void {
+	debugDirOverride = dir;
 }
 
 function sessionLogPath(): string {

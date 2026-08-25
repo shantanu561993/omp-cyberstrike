@@ -1,5 +1,8 @@
+import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import type { AgentTool, AgentToolResult, ToolTier } from "@oh-my-pi/pi-agent-core";
+import * as logger from "@oh-my-pi/pi-utils/logger";
+import * as debugSessionLog from "../debug/session-debug-log";
 import {
 	coverageReport,
 	initMethodology,
@@ -55,6 +58,10 @@ export class MethodologyTool implements AgentTool<typeof methodologySchema, Meth
 		switch (params.action) {
 			case "init": {
 				const state = initMethodology(params.target ?? "", params.out, params.force);
+				// Engagement-scoped debug output: session trace + rotating logger
+				// land in <out>/debug until the process exits.
+				debugSessionLog.setDebugLogDir(path.join(params.out, "debug"));
+				logger.setTransports({ file: path.join(params.out, "debug") });
 				return {
 					content: [
 						{

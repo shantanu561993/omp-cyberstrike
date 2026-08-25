@@ -114,7 +114,12 @@ import {
 	onModelRolesChanged,
 } from "../config/settings";
 import { RawSseDebugBuffer } from "../debug/raw-sse-buffer";
-import { dumpRawSseToDisk, sessionDebugLog, sessionDebugLogEnabled } from "../debug/session-debug-log";
+import {
+	dumpRawSseToDisk,
+	sessionDebugLog,
+	sessionDebugLogEnabled,
+	setSessionTraceEnabled,
+} from "../debug/session-debug-log";
 import { getFileSnapshotStore } from "../edit/file-snapshot-store";
 import type { PythonResult } from "../eval/py/executor";
 import type { BashPtyOptions, BashResult } from "../exec/bash-executor";
@@ -2121,6 +2126,7 @@ export class AgentSession {
 	#subscriberEmitGate: Promise<void> = Promise.resolve();
 
 	async #emitSessionEvent(event: AgentSessionEvent, options: { detachExtensions?: boolean } = {}): Promise<void> {
+		setSessionTraceEnabled(this.settings.get("debug.sessionTrace") !== false);
 		// Debug-build trace tee: committed messages (thinking + text + tool
 		// calls), tool results/errors, and lifecycle events go to
 		// <logs>/debug/debug-session.<pid>.log (no-op unless enabled).
