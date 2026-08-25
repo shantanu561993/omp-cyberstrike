@@ -135,6 +135,24 @@ compaction.reserveTokens` or the `thresholdTokens` value in the log's
 `Auto-compaction threshold decision` line. Full reference:
 `docs/compaction.md`.
 
+**Add margin for tokenizer drift (recommended).** Setting `reserveTokens`
+exactly to `maxTokens` puts the threshold at the safe ceiling with **zero
+margin** — the server's tokenizer can count a few hundred to a few thousand
+tokens more than omp's local estimate, and a turn can grow between the
+compaction check and the next request. Real runs overshoot the ceiling by
+23–4,897 tokens even with `reserveTokens: 32768`. Bump it past the output
+budget to absorb the drift:
+
+```yaml
+compaction:
+  reserveTokens: 40000   # maxTokens (32768) + ~7k drift/headroom margin
+```
+
+For a 131072-window / 32768-output model this makes the threshold 91,072 —
+~7,200 tokens of slack under the 98,304 ceiling, comfortably covering the
+worst observed overshoot (4,897). Same trade-off as before: compaction fires
+slightly earlier, output budget is untouched.
+
 ## Skill authoring & validation
 
 Every skill in `packages/coding-agent/src/pentest/skills/<name>/SKILL.md`

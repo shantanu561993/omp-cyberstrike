@@ -442,7 +442,14 @@ This does **not** reduce the model's output — `max_completion_tokens` is uncha
 | Default threshold (`131072 − max(16384, 19660)`) | 111,412 ← too late, 400s |
 | Threshold with `reserveTokens: 32768` | 98,304 ← fires before overflow |
 
-**Why the default reserve exists.** For large windows (e.g. 1M) the 15% reserve dwarfs any realistic reply, so `maxTokens` is a non-issue there. The trap is only on small windows where `maxTokens` is a large fraction of `contextWindow`. Per-model `maxTokens` in `models.yml` flows to the wire request but **not** to the compaction threshold; `compaction.reserveTokens` is the global lever that fixes the threshold today.
+**Add margin for tokenizer drift (recommended).** Setting `reserveTokens` exactly to `maxTokens` puts the threshold at the safe ceiling with **zero margin** — the server's tokenizer can count a few hundred to a few thousand tokens more than omp's local estimate, and a turn can grow between the compaction check and the next request. Real runs overshoot the ceiling by 23–4,897 tokens even with `reserveTokens: 32768`. Bump past the output budget to absorb the drift:
+
+```yaml
+compaction:
+  reserveTokens: 40000   # maxTokens (32768) + ~7k drift/headroom margin
+```
+
+For a 131072-window / 32768-output model this makes the threshold 91,072 — ~7,200 tokens of slack under the 98,304 ceiling, comfortably covering the worst observed overshoot (4,897). Same trade-off as before: compaction fires slightly earlier, output budget is untouched.
 
 ## Settings and defaults
 
