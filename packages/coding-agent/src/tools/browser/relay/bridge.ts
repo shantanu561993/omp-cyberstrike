@@ -620,6 +620,19 @@ export class RelayBridge {
 			this.#log("tab claimed", { conn: conn.id, tabId });
 		}
 		this.#syncTabGrouping(tab);
+		// Traffic capture starts with the claim: an agent is now driving the
+		// tab. When the tab is not attached yet, #ensureAttached fires the
+		// enable after attach (its gate sees the claim).
+		if (tab.attached) this.#enableNetworkCapture(tab);
+	}
+	/** Enable the Network domain for traffic capture (fire-and-forget). */
+	#enableNetworkCapture(tab: TabState): void {
+		void this.#rpc({ op: "send", tabId: tab.tabId, method: "Network.enable" }).catch(err =>
+			this.#log("network capture enable failed", {
+				tabId: tab.tabId,
+				error: err instanceof Error ? err.message : String(err),
+			}),
+		);
 	}
 
 	/** True while any downstream connection claims the tab as its drive target. */
@@ -1255,12 +1268,7 @@ export class RelayBridge {
 				// Traffic capture needs the Network domain on this tab. Also
 				// re-runs on service-worker-restart re-attach (same path).
 				// Fire-and-forget: capture must never block the attach handshake.
-				void this.#rpc({ op: "send", tabId: tab.tabId, method: "Network.enable" }).catch(err =>
-					this.#log("network capture enable failed", {
-						tabId: tab.tabId,
-						error: err instanceof Error ? err.message : String(err),
-					}),
-				);
+				if (this.#claimed(tab.tabId)) this.#enableNetworkCapture(tab);
 				tab.reattachedAfterDetach = true;
 				return true;
 			})
