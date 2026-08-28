@@ -21,6 +21,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { engines, version } from "../package.json" with { type: "json" };
+import { isEnoent, isEnotdir } from "./fs-error";
 
 /** App name (e.g. "omp-cyberstrike") — identity for dirs, logs, XDG folders. */
 export const APP_NAME: string = "omp-cyberstrike";
@@ -193,17 +194,50 @@ export function relativePathWithinRoot(root: string, candidate: string): string 
 	return relative || null;
 }
 
-let projectDir = standardizeMacOSPath(process.cwd());
+let projectDir: string | undefined;
 
 /** Get the project directory. */
 export function getProjectDir(): string {
+	if (projectDir === undefined) {
+		try {
+			projectDir = standardizeMacOSPath(process.cwd());
+		} catch {
+			const candidates = [process.env.PWD, os.homedir(), os.tmpdir()];
+			for (const candidate of candidates) {
+				if (!candidate || !path.isAbsolute(candidate)) continue;
+				try {
+					process.chdir(candidate);
+					projectDir = standardizeMacOSPath(candidate);
+					break;
+				} catch {}
+			}
+			if (projectDir === undefined) {
+				throw new Error("Unable to determine an accessible working directory");
+			}
+		}
+	}
 	return projectDir;
 }
 
 /** Set the project directory. */
 export function setProjectDir(dir: string): void {
-	projectDir = standardizeMacOSPath(path.resolve(dir));
-	process.chdir(projectDir);
+	const resolved = standardizeMacOSPath(path.resolve(dir));
+	process.chdir(resolved);
+	projectDir = resolved;
+}
+
+/** Reset the cached project directory (test seam). */
+export function __resetProjectDirCacheForTests(): void {
+	projectDir = undefined;
+}
+
+/** Whether a path is absent or not a directory. Other stat failures return false. */
+export async function directoryIsMissing(dir: string): Promise<boolean> {
+	try {
+		return !(await fs.promises.stat(dir)).isDirectory();
+	} catch (error) {
+		return isEnoent(error) || isEnotdir(error);
+	}
 }
 
 /**
@@ -221,6 +255,43 @@ export async function directoryExists(dir: string): Promise<boolean> {
 }
 
 /** Get the config directory name relative to home (e.g. ".omp-cyberstrike" or PI_CONFIG_DIR override). */
+/**
+ * Whether `dir` both exists and can be entered. POSIX `stat` succeeds for a
+ * directory whose own search/execute permission is denied (it only needs
+ * +x on the parent chain), so existence alone does not imply `chdir` works.
+ * Callers that adopt a directory as a working directory must check this
+ * rather than {@link directoryExists} alone.
+ */
+export async function directoryIsEnterable(dir: string): Promise<boolean> {
+	try {
+		const [stats] = await Promise.all([fs.promises.stat(dir), fs.promises.access(dir, fs.constants.X_OK)]);
+		return stats.isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+/** Whether `dir` is enterable, synchronous variant. See {@link directoryIsEnterable}. */
+export function directoryIsEnterableSync(dir: string): boolean {
+	try {
+		fs.accessSync(dir, fs.constants.X_OK);
+		return fs.statSync(dir).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Project directory when it is enterable, otherwise a safe fallback.
+ * Used by spawns that must preserve project-relative behavior when healthy.
+ */
+export function getSafeProjectCwd(): string {
+	try {
+		const dir = getProjectDir();
+		if (directoryIsEnterableSync(dir)) return dir;
+	} catch {}
+	return os.homedir();
+}
 export function getConfigDirName(): string {
 	return process.env.PI_CONFIG_DIR || CONFIG_DIR_NAME;
 }
