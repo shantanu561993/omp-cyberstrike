@@ -165,7 +165,7 @@ describe("listLiveToolRecords snapshot", () => {
 	});
 
 	test("joins factory siblings on a UNC source path", () => {
-		const unc = "\\\\server\\share\\.omp\\tools\\systemd.ts";
+		const unc = "\\\\server\\share\\.omp-cyberstrike\\tools\\systemd.ts";
 		const infos = [info("systemd_inspect", "extension", unc), info("systemd_control", "extension", unc)];
 		const session = fakeSession(infos, [tool("systemd_inspect"), tool("systemd_control")]);
 		const listed = listLiveToolRecords(session);

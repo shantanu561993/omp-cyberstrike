@@ -119,7 +119,7 @@ threshold           = contextWindow − max(16384, 15% × contextWindow)   # def
 ```
 
 Fix — set `compaction.reserveTokens` to at least the model's output budget in
-`~/.omp-cyberstrike/agent/config.yml` (or `~/.omp/config.yml`):
+`~/.omp-cyberstrike/agent/config.yml` (or `~/.omp-cyberstrike/config.yml`):
 
 ```yaml
 compaction:
@@ -327,15 +327,15 @@ nix run github:can1357/oh-my-pi
 nix profile install github:can1357/oh-my-pi
 ```
 
-Flake consumers can use `packages.<system>.omp`, `overlays.default`, `nixosModules.default`, or `homeManagerModules.default`. A Home Manager configuration can install OMP and own its settings declaratively:
+Flake consumers can use `packages.<system>.omp-cyberstrike`, `overlays.default`, `nixosModules.default`, or `homeManagerModules.default`. A Home Manager configuration can install OMP and own its settings declaratively:
 
 ```nix
 {
-  inputs.omp.url = "github:can1357/oh-my-pi";
+  inputs.omp-cyberstrike.url = "github:can1357/oh-my-pi";
 
   # In your Home Manager module:
-  imports = [ inputs.omp.homeManagerModules.default ];
-  programs.omp = {
+  imports = [ inputs.omp-cyberstrike.homeManagerModules.default ];
+  programs.omp-cyberstrike = {
     enable = true;
     settings.startup.quiet = true;
   };

@@ -53,10 +53,10 @@ describe("`..` range selector alias", () => {
 describe("isFilesystemSourcePath", () => {
 	it("accepts POSIX, Windows drive, and UNC paths", () => {
 		expect(isFilesystemSourcePath("/tmp/tools/systemd.ts")).toBe(true);
-		expect(isFilesystemSourcePath("C:\\repo\\.omp\\tools\\systemd.ts")).toBe(true);
-		expect(isFilesystemSourcePath("C:/.omp/tools/systemd.ts")).toBe(true);
-		expect(isFilesystemSourcePath("\\\\server\\share\\.omp\\tools\\systemd.ts")).toBe(true);
-		expect(isFilesystemSourcePath("//server/share/.omp/tools/systemd.ts")).toBe(true);
+		expect(isFilesystemSourcePath("C:\\repo\\.omp-cyberstrike\\tools\\systemd.ts")).toBe(true);
+		expect(isFilesystemSourcePath("C:/.omp-cyberstrike/tools/systemd.ts")).toBe(true);
+		expect(isFilesystemSourcePath("\\\\server\\share\\.omp-cyberstrike\\tools\\systemd.ts")).toBe(true);
+		expect(isFilesystemSourcePath("//server/share/.omp-cyberstrike/tools/systemd.ts")).toBe(true);
 		expect(isFilesystemSourcePath("systemd.ts")).toBe(false);
 		expect(isFilesystemSourcePath("<extension:systemd>")).toBe(false);
 		expect(isFilesystemSourcePath("mcp:gog")).toBe(false);

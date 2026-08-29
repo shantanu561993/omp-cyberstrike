@@ -24,7 +24,7 @@ packages/snapcompact/research/results/
 .wt/
 .opencode/
 .pi_config/
-.omp/plugins/
+.omp-cyberstrike/plugins/
 
 # VCS, editors, IDEs — irrelevant to the build, churn on every IDE keystroke.
 .git/

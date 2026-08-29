@@ -169,7 +169,7 @@ describe("legacy file adoption on XDG paths", () => {
 		const xdgData = path.join(tempRoot, "xdg-data");
 		await fs.mkdir(path.join(xdgState, "omp-cyberstrike"), { recursive: true });
 		await fs.mkdir(path.join(xdgData, "omp-cyberstrike"), { recursive: true });
-		// Legacy layout: key under ~/.omp/agent, registry under ~/.omp.
+		// Legacy layout: key under ~/.omp-cyberstrike/agent, registry under ~/.omp-cyberstrike.
 		await fs.mkdir(path.join(tempRoot, ".omp-cyberstrike", "agent"), { recursive: true });
 		await fs.writeFile(path.join(tempRoot, ".omp-cyberstrike", "agent", "secret-placeholder.key"), "legacy-key");
 		await fs.writeFile(path.join(tempRoot, ".omp-cyberstrike", "marketplaces.json"), '{"legacy":true}');

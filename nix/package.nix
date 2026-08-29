@@ -219,7 +219,7 @@ stdenv.mkDerivation {
   # stdenv.cc.cc.lib is already in buildInputs, so the autoPatchelfHook pass that
   # follows resolves the new dependency and sets the RPATH. patchelf must run before
   # wrapProgram: the wrapper replaces $out/bin/omp with a script and moves the ELF
-  # to $out/bin/.omp-wrapped.
+  # to $out/bin/.omp-cyberstrike-wrapped.
   postFixup = lib.optionalString stdenv.hostPlatform.isLinux ''
     patchelf --add-needed libstdc++.so.6 "$out/bin/omp"
     wrapProgram "$out/bin/omp" \
@@ -237,9 +237,9 @@ stdenv.mkDerivation {
   # section address. preInstallCheck runs after every fixupPhase hook, including
   # the autoPatchelfHook pass that follows postFixup, so it is the last point at
   # which the field can be corrected; wrapProgram moved the real ELF to
-  # `.omp-wrapped`.
+  # `.omp-cyberstrike-wrapped`.
   preInstallCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
-    bun ${../scripts/fix-dt-verdef.ts} "$out/bin/.omp-wrapped"
+    bun ${../scripts/fix-dt-verdef.ts} "$out/bin/.omp-cyberstrike-wrapped"
   '';
 
   doInstallCheck = true;
@@ -260,8 +260,8 @@ stdenv.mkDerivation {
         'const {dlopen}=require("bun:ffi");const dirs=(process.env.OMP_NATIVE_LIBRARY_PATH||"").split(":").filter(Boolean);const need={"libstdc++.so.6":{__cxa_demangle:{args:["ptr","ptr","ptr","ptr"],returns:"ptr"}},"libgcc_s.so.1":{_Unwind_Backtrace:{args:["ptr","ptr"],returns:"i32"}}};for(const lib of Object.keys(need)){let ok=false;for(const d of dirs){try{dlopen(d+"/"+lib,need[lib]);ok=true;break}catch(e){}}if(!ok){console.error("unresolved: "+lib);process.exit(1)}}'
       # The libstdc++ preload (see postFixup) must survive: without it addons the
       # main process dlopen's directly fail to resolve libstdc++.so.6 on NixOS.
-      # wrapProgram moved the real ELF to .omp-wrapped.
-      patchelf --print-needed "$out/bin/.omp-wrapped" | grep -q '^libstdc++\.so\.6$'
+      # wrapProgram moved the real ELF to .omp-cyberstrike-wrapped.
+      patchelf --print-needed "$out/bin/.omp-cyberstrike-wrapped" | grep -q '^libstdc++\.so\.6$'
     ''}
     runHook postInstallCheck
   '';

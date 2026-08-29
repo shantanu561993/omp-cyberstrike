@@ -415,12 +415,12 @@ test("explicit-only mode drops the configured lane and installed roots (#9769)",
 });
 
 test("configured lane takes its level from the authority's configuredLevel, not the disk scan (#9769)", async () => {
-	// A project provider Settings can't see on the `.omp` disk scan (e.g.
+	// A project provider Settings can't see on the `.omp-cyberstrike` disk scan (e.g.
 	// `.claude/settings.json`) still yields a project-level root because the
 	// session carries the Settings-resolved provenance in the struct.
 	const configuredExt = path.join(tempDir, "provenance-extension");
 	buildExtensionPackage(configuredExt, "provenance-skill");
-	// Nothing on `.omp` disk configures it — the old deepEquals scan would label it `user`.
+	// Nothing on `.omp-cyberstrike` disk configures it — the old deepEquals scan would label it `user`.
 
 	const asProject = await listOmpExtensionRoots({
 		...ctx(),

@@ -44,8 +44,8 @@ coverage/
 packages/ai/test/.temp-images/
 
 # Project specific
-!.omp/
-.omp/plugins/
+!.omp-cyberstrike/
+.omp-cyberstrike/plugins/
 .pi_config/
 .opencode/
 .worktrees/

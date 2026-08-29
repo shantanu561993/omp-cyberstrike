@@ -11,7 +11,7 @@
  * Contract under test: after `loadCliExtensionProviders` drains the extension's
  * provider registrations into the registry, a `provider/id` selector for that
  * extension provider resolves. Discovery is disabled and the extension path is
- * passed explicitly so the test never touches the developer's real `~/.omp`.
+ * passed explicitly so the test never touches the developer's real `~/.omp-cyberstrike`.
  */
 
 import { afterAll, beforeAll, expect, test } from "bun:test";

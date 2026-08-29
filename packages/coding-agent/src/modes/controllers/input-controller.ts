@@ -2135,7 +2135,7 @@ export class InputController {
 
 		try {
 			this.ctx.ui.stop();
-			const result = await openInEditor(editorCmd, currentText, { extension: ".omp.md" });
+			const result = await openInEditor(editorCmd, currentText, { extension: ".omp-cyberstrike.md" });
 			if (result !== null) {
 				this.ctx.editor.setText(result);
 			}

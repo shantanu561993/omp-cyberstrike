@@ -2,8 +2,8 @@
  * Agent discovery from filesystem.
  *
  * Discovers agent definitions from OMP-native task-agent roots:
- *   - ~/.omp/agent/agents/*.md (user-level)
- *   - .omp/agents/*.md (project-level)
+ *   - ~/.omp-cyberstrike/agent/agents/*.md (user-level)
+ *   - .omp-cyberstrike/agents/*.md (project-level)
  *   - <ext>/agents/*.md for every OMP extension package wired through
  *     `listOmpExtensionRoots` (CLI `--extension` roots, `extensions:` in
  *     settings, and enabled npm/link plugins under `<plugins>/node_modules/`).
@@ -61,7 +61,7 @@ async function loadAgentsFromDir(dir: string, source: AgentSource): Promise<Agen
 
 /**
  * Discover agents from filesystem and merge with bundled agents.
- * Precedence (highest wins): project `.omp/agents`, user `.omp/agents`,
+ * Precedence (highest wins): project `.omp-cyberstrike/agents`, user `.omp-cyberstrike/agents`,
  * OMP extension-package agents from the effective `extensions` setting,
  * installed npm/link plugins, Claude marketplace plugin agents (project scope
  * before user), then bundled.

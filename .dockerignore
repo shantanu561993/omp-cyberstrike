@@ -29,7 +29,7 @@ packages/snapcompact/research/results/
 .wt/
 .opencode/
 .pi_config/
-.omp/plugins/
+.omp-cyberstrike/plugins/
 
 # VCS, editors, IDEs.
 .git/

@@ -275,7 +275,7 @@ def test_build_extra_env_stages_agent_home(tmp_path: Path, settings: Settings, m
 
     agent_dir = stage_home / ".agent"
     agent_rules_dir = agent_dir / "rules"
-    omp_agent_dir = stage_home / ".omp" / "agent"
+    omp_agent_dir = stage_home / ".omp-cyberstrike" / "agent"
     agent_rules_dir.mkdir(parents=True)
     omp_agent_dir.mkdir(parents=True)
     (agent_dir / "AGENTS.md").write_text("agent instructions\n", encoding="utf-8")
@@ -287,13 +287,13 @@ def test_build_extra_env_stages_agent_home(tmp_path: Path, settings: Settings, m
     assert env["HOME"] == str(agent_home)
     assert (agent_home / ".agent" / "AGENTS.md").is_file()
     assert (agent_home / ".agent" / "rules" / "rule.md").is_file()
-    assert (agent_home / ".omp" / "agent" / "models.yml").is_file()
+    assert (agent_home / ".omp-cyberstrike" / "agent" / "models.yml").is_file()
     assert (agent_home / ".agent").stat().st_mode & 0o777 == 0o755
     assert (agent_home / ".agent" / "AGENTS.md").stat().st_mode & 0o777 == 0o644
     assert (agent_home / ".agent" / "rules").stat().st_mode & 0o777 == 0o755
     assert (agent_home / ".agent" / "rules" / "rule.md").stat().st_mode & 0o777 == 0o644
-    assert (agent_home / ".omp" / "agent").stat().st_mode & 0o777 == 0o755
-    assert (agent_home / ".omp" / "agent" / "models.yml").stat().st_mode & 0o777 == 0o644
+    assert (agent_home / ".omp-cyberstrike" / "agent").stat().st_mode & 0o777 == 0o755
+    assert (agent_home / ".omp-cyberstrike" / "agent" / "models.yml").stat().st_mode & 0o777 == 0o644
 
 
 @pytest.mark.asyncio
@@ -338,12 +338,12 @@ async def test_run_rpc_uses_workspace_xdg_dirs_without_slot(tmp_path: Path, sett
         loop.close()
 
     env = _FakeRpcClient.instances[0].kwargs["env"]
-    xdg_root = inputs.workspace.root / ".omp-xdg"
+    xdg_root = inputs.workspace.root / ".omp-cyberstrike-xdg"
     for key in ("XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
         path = Path(env[key])
         assert path.is_relative_to(xdg_root)
         assert (path / "omp").is_dir()
-    tmpdir = inputs.workspace.root / ".omp-tmp"
+    tmpdir = inputs.workspace.root / ".omp-cyberstrike-tmp"
     assert env["TMPDIR"] == str(tmpdir)
     assert env["TMP"] == str(tmpdir)
     assert env["TEMP"] == str(tmpdir)

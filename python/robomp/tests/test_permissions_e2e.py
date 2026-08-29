@@ -260,7 +260,7 @@ def test_slot_workspace_runs_bun_biome_cargo_and_git_after_root_reentry(
     workspaces = slot_tmp_path / "workspaces"
 
     first = _ensure_workspace(workspaces, upstream_repo, number=101, slot_uid=_SLOT_ONE)
-    stale_bun_cache = first.root / ".omp-xdg" / "cache" / "bun-install" / "root-owned-stale"
+    stale_bun_cache = first.root / ".omp-cyberstrike-xdg" / "cache" / "bun-install" / "root-owned-stale"
     stale_bun_cache.mkdir(parents=True, exist_ok=True)
     stale_marker = stale_bun_cache / "marker.txt"
     stale_marker.write_text("root-owned\n", encoding="utf-8")

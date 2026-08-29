@@ -6,7 +6,7 @@ import { getAgentDir, getConfigRootDir, getPluginsDir } from "@oh-my-pi/pi-utils
 // the user-extension list from three independent roots, any one of which can
 // leak entries on a contributor's box:
 //
-// 1. `getConfigRootDir()` (`~/.omp`)
+// 1. `getConfigRootDir()` (`~/.omp-cyberstrike`)
 //    Catches the native builtin provider's settings.json-declared extensions
 //    that resolve outside the `agent/extensions/` subtree (e.g. an absolute
 //    or `../`-relative entry pointing somewhere else under `~/.omp-cyberstrike/`), plus
@@ -15,7 +15,7 @@ import { getAgentDir, getConfigRootDir, getPluginsDir } from "@oh-my-pi/pi-utils
 //    Handles `PI_CODING_AGENT_DIR` overrides that relocate the agent dir
 //    (and therefore `agent/extensions/`) out from under the config root.
 // 3. `getPluginsDir()` (XDG-aware: `$XDG_DATA_HOME/omp/plugins` or legacy)
-//    Handles installed plugin extensions that live outside `~/.omp` when
+//    Handles installed plugin extensions that live outside `~/.omp-cyberstrike` when
 //    XDG_DATA_HOME resolves the plugins dir somewhere else.
 //
 // We deliberately do NOT use `pathIsWithin` from pi-utils here: that helper

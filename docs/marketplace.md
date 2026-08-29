@@ -13,18 +13,18 @@ In the TUI, `/marketplace` with no arguments opens the interactive plugin browse
 
 ## Concepts
 
-A **marketplace** is a Git repository (or local directory) containing a catalog file at `.omp-plugin/marketplace.json` (preferred) or `.claude-plugin/marketplace.json` (Claude Code-compatible fallback). The catalog lists available plugins with their sources, descriptions, and metadata.
+A **marketplace** is a Git repository (or local directory) containing a catalog file at `.omp-cyberstrike-plugin/marketplace.json` (preferred) or `.claude-plugin/marketplace.json` (Claude Code-compatible fallback). The catalog lists available plugins with their sources, descriptions, and metadata.
 
 A **plugin** is a directory containing Claude/OMP plugin content such as skills, commands, agents, rules, hooks, tools, MCP servers, or LSP servers. Marketplace installs also load extension modules declared by `package.json` `omp.extensions`: installation symlinks the cached plugin into the scope's `node_modules` tree and records it in `omp-plugins.lock.json`, the same runtime surfaces used by npm-installed and `omp plugin link`ed plugins. Plugins are identified by `name@marketplace` (e.g. `code-review@claude-plugins-official`).
 
 **Scopes**: marketplace plugins can be installed at two scopes:
 
-- **user** (default) -- available in all projects, stored in the user plugins data root's `installed_plugins.json` (`~/.omp/plugins/installed_plugins.json` by default)
-- **project** -- available only in the active project, stored in the nearest project `.omp/plugins/installed_plugins.json`
+- **user** (default) -- available in all projects, stored in the user plugins data root's `installed_plugins.json` (`~/.omp-cyberstrike/plugins/installed_plugins.json` by default)
+- **project** -- available only in the active project, stored in the nearest project `.omp-cyberstrike/plugins/installed_plugins.json`
 
 Enabled project-scoped installs shadow enabled user-scoped installs of the same plugin. A disabled project install does not shadow the user install.
 
-On Linux and macOS, `omp config init-xdg` creates the XDG data, state, and cache roots; it does not move existing data. Once the relevant roots exist and `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CACHE_HOME` are set, new user marketplace/plugin state resolves under `$XDG_DATA_HOME/omp` (including `marketplaces.json` and `plugins/`). The `~/.omp` paths below are the non-XDG defaults.
+On Linux and macOS, `omp config init-xdg` creates the XDG data, state, and cache roots; it does not move existing data. Once the relevant roots exist and `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CACHE_HOME` are set, new user marketplace/plugin state resolves under `$XDG_DATA_HOME/omp` (including `marketplaces.json` and `plugins/`). The `~/.omp-cyberstrike` paths below are the non-XDG defaults.
 
 ## Commands
 
@@ -89,11 +89,11 @@ When you run `/marketplace add <source>`, the system classifies the source:
 | `git@...` / `ssh://...`         | Git repository                                     | `git@github.com:org/repo.git`          |
 | `./path` or `~/path` or `/path` | Local directory                                    | `./my-marketplace`                     |
 
-Git and local sources must contain a catalog at `.omp-plugin/marketplace.json` (preferred) or `.claude-plugin/marketplace.json` (Claude Code-compatible fallback). Direct catalog URLs cache only the JSON catalog; plugins in URL-sourced catalogs cannot use relative string sources like `"./plugins/foo"`.
+Git and local sources must contain a catalog at `.omp-cyberstrike-plugin/marketplace.json` (preferred) or `.claude-plugin/marketplace.json` (Claude Code-compatible fallback). Direct catalog URLs cache only the JSON catalog; plugins in URL-sourced catalogs cannot use relative string sources like `"./plugins/foo"`.
 
 ## Catalog format (marketplace.json)
 
-A marketplace catalog lives at `.omp-plugin/marketplace.json` in the repository root. When omp is the only intended consumer, prefer this path. To remain Claude Code-compatible (omp loads the same shape from either path), publish at `.claude-plugin/marketplace.json` instead — omp uses it as a fallback when `.omp-plugin/marketplace.json` is absent. A repository may ship both: omp reads the `.omp-plugin/` copy, Claude Code reads the `.claude-plugin/` copy. Same catalog format either way:
+A marketplace catalog lives at `.omp-cyberstrike-plugin/marketplace.json` in the repository root. When omp is the only intended consumer, prefer this path. To remain Claude Code-compatible (omp loads the same shape from either path), publish at `.claude-plugin/marketplace.json` instead — omp uses it as a fallback when `.omp-cyberstrike-plugin/marketplace.json` is absent. A repository may ship both: omp reads the `.omp-cyberstrike-plugin/` copy, Claude Code reads the `.claude-plugin/` copy. Same catalog format either way:
 
 ```json
 {
@@ -221,7 +221,7 @@ Invalid catalog JSON or invalid required top-level fields reject the catalog. An
 ## On-disk layout
 
 ```
-~/.omp/
+~/.omp-cyberstrike/
   marketplaces.json              # Registry of added marketplaces
   plugins/
     installed_plugins.json       # User-scoped marketplace plugins (version: 2)
@@ -231,7 +231,7 @@ Invalid catalog JSON or invalid required top-level fields reject the catalog. An
       marketplaces/<name>/       # Cached marketplace clone/catalog
       plugins/<marketplace>___<plugin>___<version>/  # Cached plugin directories
 
-<project>/.omp/
+<project>/.omp-cyberstrike/
   plugins/
     installed_plugins.json       # Project-scoped marketplace plugins (version: 2)
     omp-plugins.lock.json         # Project runtime enable/feature state

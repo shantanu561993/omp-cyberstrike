@@ -123,7 +123,7 @@ describe("SessionManager cwd adoption on resume", () => {
 		const launch = makeTempDir("@pi-cwd-launch-");
 		const store = makeTempDir("@pi-cwd-store-");
 		const goneProject = makeTempDir("@pi-cwd-gone-");
-		// The session file survives in `store` (like ~/.omp), but its header cwd
+		// The session file survives in `store` (like ~/.omp-cyberstrike), but its header cwd
 		// points at a project directory that we then delete.
 		const file = await writeSession(goneProject, store);
 		await removeWithRetries(goneProject);

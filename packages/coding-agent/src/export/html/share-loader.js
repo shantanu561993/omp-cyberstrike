@@ -36,7 +36,7 @@
         if (!res.ok) throw new Error('Gist fetch failed: HTTP ' + res.status);
         var gist = await res.json();
         var files = Object.values(gist.files || {});
-        var file = files.find(function(f) { return /\.ompshare\.txt$/.test(f.filename); }) || files[0];
+        var file = files.find(function(f) { return /\.omp-cyberstrikeshare\.txt$/.test(f.filename); }) || files[0];
         if (!file) throw new Error('Gist has no files.');
         var text = file.content;
         if (!text || file.truncated) {

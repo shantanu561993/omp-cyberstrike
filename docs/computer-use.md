@@ -7,7 +7,7 @@
 
 ## Enable and configure
 
-The tool is disabled by default. Configure it in `~/.omp/agent/config.yml`, project `.omp/config.yml`, or a `--config` overlay:
+The tool is disabled by default. Configure it in `~/.omp-cyberstrike/agent/config.yml`, project `.omp-cyberstrike/config.yml`, or a `--config` overlay:
 
 ```yaml
 computer:

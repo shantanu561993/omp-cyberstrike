@@ -119,7 +119,7 @@ web_search:
   enabled: false
 `;
 	const writeConfig = await vm.exec(
-		`mkdir -p "$HOME/.omp/agent"\ncat > "$HOME/.omp/agent/models.yml" <<'OMP_MODELS_EOF'\n${modelsYaml}OMP_MODELS_EOF\ncat > "$HOME/.omp/agent/config.yml" <<'OMP_CONFIG_EOF'\n${configYaml}OMP_CONFIG_EOF`,
+		`mkdir -p "$HOME/.omp-cyberstrike/agent"\ncat > "$HOME/.omp-cyberstrike/agent/models.yml" <<'OMP_MODELS_EOF'\n${modelsYaml}OMP_MODELS_EOF\ncat > "$HOME/.omp-cyberstrike/agent/config.yml" <<'OMP_CONFIG_EOF'\n${configYaml}OMP_CONFIG_EOF`,
 	);
 	if (writeConfig.exitCode !== 0) throw new Error(`Could not install omp configuration: ${writeConfig.stderr.trim()}`);
 	return entrypoint;

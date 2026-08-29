@@ -14,7 +14,7 @@ Permission model
 There are four ownership zones on disk; do not let them blur:
 
 1. **Workspace tree** (`/data/workspaces/<key>/`, including `repo/`,
-   `.omp-session/`, `context/`, `artifacts/`, `.omp-tmp/`, `.omp-xdg`):
+   `.omp-cyberstrike-session/`, `context/`, `artifacts/`, `.omp-cyberstrike-tmp/`, `.omp-cyberstrike-xdg`):
    single-owner. Owned by the active slot UID/GID (`omp-N`) when slot
    isolation is enabled, otherwise by the orchestrator's own UID/GID. Modes
    stay `u=rwX,g=rwX,o=` (effectively `0770` dirs / `0660` files). The
@@ -490,14 +490,14 @@ def _prepare_slot_tmpdir(workspace: Workspace, slot_uid: int | None) -> Path:
     Ownership/mode is set by ``_chown_workspace`` as part of the workspace's
     single-ownership invariant; this helper only:
 
-    - replaces any non-directory at ``.omp-tmp`` (symlink-protection: a user
+    - replaces any non-directory at ``.omp-cyberstrike-tmp`` (symlink-protection: a user
       who plants a symlink there could redirect later writes outside the
       workspace regardless of who owns the destination), and
     - ``mkdir(mode=0o700, exist_ok=True)`` as a safety net for callers that
       run before ``ensure_workspace`` (e.g. unit tests with ``slot_uid=None``).
     """
     del slot_uid  # ownership is _chown_workspace's job; kept for call-site parity
-    tmpdir = workspace.root / ".omp-tmp"
+    tmpdir = workspace.root / ".omp-cyberstrike-tmp"
     try:
         st = tmpdir.lstat()
     except FileNotFoundError:
@@ -538,7 +538,7 @@ def _prepare_slot_runtime_env(workspace: Workspace, slot_uid: int | None) -> dic
     cross-slot shared cache a permanent source of permission failures.
     """
     tmpdir = _prepare_slot_tmpdir(workspace, slot_uid)
-    xdg_root = workspace.root / ".omp-xdg"
+    xdg_root = workspace.root / ".omp-cyberstrike-xdg"
     xdg_data = xdg_root / "data"
     xdg_state = xdg_root / "state"
     xdg_cache = xdg_root / "cache"
@@ -564,14 +564,14 @@ def _provision_runtime_dirs(ws_root: Path) -> None:
     """Create the runtime dirs that ``_chown_workspace`` will hand to the slot.
 
     Runs immediately before ``_chown_workspace`` so the recursive chown sweep
-    picks up ``.omp-tmp`` and the per-workspace XDG tree. Without this,
+    picks up ``.omp-cyberstrike-tmp`` and the per-workspace XDG tree. Without this,
     ``_prepare_slot_runtime_env`` would create them later from the orchestrator
     process — leaving root-owned cache roots that bun/biome/cargo cannot
     chmod/utime, the original source of the recurring permission failures.
 
-    Symlink-safe on ``.omp-tmp`` (replaces a planted non-directory in place).
+    Symlink-safe on ``.omp-cyberstrike-tmp`` (replaces a planted non-directory in place).
     """
-    tmpdir = ws_root / ".omp-tmp"
+    tmpdir = ws_root / ".omp-cyberstrike-tmp"
     try:
         st = tmpdir.lstat()
     except FileNotFoundError:
@@ -581,7 +581,7 @@ def _provision_runtime_dirs(ws_root: Path) -> None:
             tmpdir.unlink()
     tmpdir.mkdir(mode=0o700, parents=True, exist_ok=True)
 
-    xdg_root = ws_root / ".omp-xdg"
+    xdg_root = ws_root / ".omp-cyberstrike-xdg"
     for sub in ("data", "state", "cache"):
         base = xdg_root / sub
         base.mkdir(parents=True, exist_ok=True)
@@ -756,8 +756,8 @@ def _stage_workspace_trash(ws_root: Path) -> tuple[Path, ...]:
         return ()
     staged = [p for p in ws_root.iterdir() if p.name.startswith(_TRASH_PREFIX)]
     candidates = [
-        ws_root / ".omp-xdg" / "cache",
-        ws_root / ".omp-tmp",
+        ws_root / ".omp-cyberstrike-xdg" / "cache",
+        ws_root / ".omp-cyberstrike-tmp",
         *_find_node_modules(ws_root / "repo"),
     ]
     trash_root: Path | None = None
@@ -896,7 +896,7 @@ class SandboxManager:
             pool = self.ensure_clone(repo=repo, clone_url=clone_url, default_branch=default_branch)
             ws_root = self.workspace_root(repo, number)
             repo_dir = ws_root / "repo"
-            session_dir = ws_root / ".omp-session"
+            session_dir = ws_root / ".omp-cyberstrike-session"
             context_dir = ws_root / "context"
             artifacts_dir = ws_root / "artifacts"
             for path in (ws_root, session_dir, context_dir, context_dir / "repro", artifacts_dir):
@@ -1044,7 +1044,7 @@ class SandboxManager:
             self.transport.fetch_pool(repo=repo, pool_dir=pool)
             ws_root = self.workspace_root(repo, "release")
             repo_dir = ws_root / "repo"
-            session_dir = ws_root / f".omp-session-{tag}"
+            session_dir = ws_root / f".omp-cyberstrike-session-{tag}"
             context_dir = ws_root / "context"
             artifacts_dir = ws_root / "artifacts"
             for path in (ws_root, session_dir, context_dir, context_dir / "repro", artifacts_dir):

@@ -130,5 +130,5 @@ export const usageHelp = {
 } satisfies CommandMetadata;
 
 export const worktreeHelp = {
-	description: "List or clear agent-managed git worktrees (~/.omp/wt)",
+	description: "List or clear agent-managed git worktrees (~/.omp-cyberstrike/wt)",
 } satisfies CommandMetadata;

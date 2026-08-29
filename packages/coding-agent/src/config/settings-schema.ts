@@ -667,7 +667,8 @@ export const SETTINGS_SCHEMA = {
 				{
 					value: "project",
 					label: "Per-project",
-					description: "Save project role models in .omp/config.yml; missing project roles use global defaults",
+					description:
+						"Save project role models in .omp-cyberstrike/config.yml; missing project roles use global defaults",
 				},
 			],
 		},
@@ -2994,7 +2995,7 @@ export const SETTINGS_SCHEMA = {
 	"sharpshooter.injectionTokenLimit": { type: "number", default: 15000 },
 
 	// Auto-Learn (experimental): post-stop nudge to capture lessons to memory
-	// and mint/enhance isolated managed skills under ~/.omp/agent/managed-skills.
+	// and mint/enhance isolated managed skills under ~/.omp-cyberstrike/agent/managed-skills.
 	// Master flag is default-off → zero footprint; sub-flags gate behaviour.
 	"autolearn.enabled": {
 		type: "boolean",
@@ -4439,7 +4440,8 @@ export const SETTINGS_SCHEMA = {
 			tab: "tools",
 			group: "GitHub",
 			label: "GitHub View Cache",
-			description: "Cache rendered issue/PR view output in ~/.omp/cache/github-cache.db so repeated reads are free",
+			description:
+				"Cache rendered issue/PR view output in ~/.omp-cyberstrike/cache/github-cache.db so repeated reads are free",
 		},
 	},
 
@@ -4963,7 +4965,7 @@ export const SETTINGS_SCHEMA = {
 			group: "Isolation",
 			label: "Worktree Base Directory",
 			description:
-				"Base directory for agent-managed worktrees — task-isolation copies, `github` PR checkouts, and `omp worktree` cleanup all live here. Unset uses ~/.omp/wt. Must be an absolute or ~-relative path; relative paths are ignored. The OMP_WORKTREE_DIR env var overrides this.",
+				"Base directory for agent-managed worktrees — task-isolation copies, `github` PR checkouts, and `omp worktree` cleanup all live here. Unset uses ~/.omp-cyberstrike/wt. Must be an absolute or ~-relative path; relative paths are ignored. The OMP_WORKTREE_DIR env var overrides this.",
 		},
 	},
 

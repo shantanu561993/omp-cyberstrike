@@ -26,7 +26,7 @@ export const RELAY_EXTENSION_FILES: Record<string, string> = {
 	"THIRD-PARTY-NOTICES.txt": thirdPartyNotices,
 };
 
-/** Default materialized extension dir: ~/.omp/browser-relay/extension. */
+/** Default materialized extension dir: ~/.omp-cyberstrike/browser-relay/extension. */
 export function relayExtensionDir(): string {
 	return path.join(getBrowserRelayDir(), "extension");
 }

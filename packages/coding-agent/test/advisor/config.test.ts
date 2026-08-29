@@ -276,11 +276,11 @@ describe("WATCHDOG.yml file round-trip", () => {
 	});
 
 	it("resolves project and user scope paths", () => {
-		expect(advisorConfigFilePath("project", { projectDir: "/repo", agentDir: "/home/.omp" })).toBe(
+		expect(advisorConfigFilePath("project", { projectDir: "/repo", agentDir: "/home/.omp-cyberstrike" })).toBe(
 			path.join("/repo", "WATCHDOG.yml"),
 		);
-		expect(advisorConfigFilePath("user", { projectDir: "/repo", agentDir: "/home/.omp" })).toBe(
-			path.join("/home/.omp", "WATCHDOG.yml"),
+		expect(advisorConfigFilePath("user", { projectDir: "/repo", agentDir: "/home/.omp-cyberstrike" })).toBe(
+			path.join("/home/.omp-cyberstrike", "WATCHDOG.yml"),
 		);
 	});
 });

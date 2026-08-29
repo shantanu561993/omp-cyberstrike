@@ -1278,7 +1278,7 @@ echo ok
 			expect(runGit(wt200, ["branch", "--show-current"])).toBe("pr-200");
 			// Both PR URLs persisted to git config (single read instead of two).
 			// `--get-regexp` echoes variable names in git's canonical lowercase.
-			const prUrls = runGit(fixture.repoRoot, ["config", "--get-regexp", "^branch\\.pr-.*\\.ompprurl$"]);
+			const prUrls = runGit(fixture.repoRoot, ["config", "--get-regexp", "^branch\\.pr-.*\\.omp-cyberstrikeprurl$"]);
 			expect(prUrls).toContain("branch.pr-100.ompprurl https://github.com/owner/repo/pull/100");
 			expect(prUrls).toContain("branch.pr-200.ompprurl https://github.com/owner/repo/pull/200");
 

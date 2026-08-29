@@ -60,7 +60,7 @@ describe("profile directories", () => {
 		originalXdgStateHome = process.env.XDG_STATE_HOME;
 		originalXdgCacheHome = process.env.XDG_CACHE_HOME;
 		tempRoot = path.join(os.tmpdir(), "pi-utils-profiles", Snowflake.next());
-		configDir = `.omp-profile-test-${Snowflake.next()}`;
+		configDir = `.omp-cyberstrike-profile-test-${Snowflake.next()}`;
 		await fs.mkdir(tempRoot, { recursive: true });
 		process.env.PI_CONFIG_DIR = configDir;
 		// Other suites that run before this one (e.g. dirs-python-gateway) may have
@@ -370,7 +370,7 @@ describe("dirs module import behavior", () => {
 
 	it("ignores inherited profile agent dir when OMP_PROFILE explicitly selects default", async () => {
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "pi-utils-dirs-default-profile-"));
-		const probeConfigDir = `.omp-default-profile-${Snowflake.next()}`;
+		const probeConfigDir = `.omp-cyberstrike-default-profile-${Snowflake.next()}`;
 		try {
 			const dirsUrl = url.pathToFileURL(path.join(import.meta.dir, "..", "src", "dirs.ts")).href;
 			const workAgentDir = path.join(os.homedir(), probeConfigDir, "profiles", "work", "agent");
@@ -424,7 +424,7 @@ describe("dirs module import behavior", () => {
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "pi-utils-profile-env-xdg-"));
 		const homeDir = path.join(root, "home");
 		const xdgStateRoot = path.join(root, "xdg-state");
-		const profileConfigDir = `.omp-env-xdg-${Snowflake.next()}`;
+		const profileConfigDir = `.omp-cyberstrike-env-xdg-${Snowflake.next()}`;
 		try {
 			const envUrl = url.pathToFileURL(path.join(import.meta.dir, "..", "src", "env.ts")).href;
 			const dirsUrl = url.pathToFileURL(path.join(import.meta.dir, "..", "src", "dirs.ts")).href;

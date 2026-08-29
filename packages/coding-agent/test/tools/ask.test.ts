@@ -418,7 +418,7 @@ describe("AskTool option descriptions", () => {
 		const select = vi.fn(async (_prompt: string, options: ExtensionUISelectItem[]) => {
 			expect(options[0]).toEqual({
 				label: "Use local credentials",
-				description: "Authenticate with provider keys already configured under ~/.omp.",
+				description: "Authenticate with provider keys already configured under ~/.omp-cyberstrike.",
 			});
 			expect(options[1]).toEqual({
 				label: "Set up in terminal",
@@ -439,7 +439,7 @@ describe("AskTool option descriptions", () => {
 						options: [
 							{
 								label: "Use local credentials",
-								description: "Authenticate with provider keys already configured under ~/.omp.",
+								description: "Authenticate with provider keys already configured under ~/.omp-cyberstrike.",
 							},
 							{
 								label: "Set up in terminal",
@@ -472,7 +472,7 @@ describe("AskTool option descriptions", () => {
 				options: [
 					{
 						label: "Use local credentials",
-						description: "Authenticate with provider keys already configured under ~/.omp.",
+						description: "Authenticate with provider keys already configured under ~/.omp-cyberstrike.",
 					},
 					{
 						label: "Set up in terminal",

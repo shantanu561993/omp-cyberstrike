@@ -106,7 +106,7 @@ If `repo` is omitted, `gh` repository resolution is used.
 
 `repo` defaults to the current checkout's GitHub repository. Omitting `branch` asks GitHub for the repository's default branch. Every path segment is URL-encoded independently. The operation rejects an empty path or one beginning with `/`; GitHub reports missing files, directories, and invalid refs through the normal CLI error mapping. The model-facing prompt requires this operation, rather than `curl` or `wget`, for files hosted in GitHub repositories.
 
-Single-issue and single-PR reads live in the `issue://<N>` / `pr://<N>` URL schemes (see `docs/tools/read.md`). They share `~/.omp/cache/github-cache.db` (override via `OMP_GITHUB_CACHE_DB`) and the `github.cache.softTtlSec` / `github.cache.hardTtlSec` / `github.cache.enabled` settings. The cache retains rendered Markdown plus the raw JSON payload returned by `gh`, including private bodies, comments, reviews, and review comments when comments are enabled; rows are scoped by the local GitHub credential fingerprint. Root and repo-scoped reads (`issue://`, `pr://owner/repo`) issue a live `gh issue list` / `gh pr list` for browsing; query params `state`, `limit`, `author`, `label` pass through to `gh` (`issue://` accepts `state=open|closed|all`; `pr://` also accepts `merged`). PR diffs ride the same cache under `pr://<N>/diff[/…]`: the listing, full diff, and per-file slices all share one `pr-diff` row keyed by repo and PR number.
+Single-issue and single-PR reads live in the `issue://<N>` / `pr://<N>` URL schemes (see `docs/tools/read.md`). They share `~/.omp-cyberstrike/cache/github-cache.db` (override via `OMP_GITHUB_CACHE_DB`) and the `github.cache.softTtlSec` / `github.cache.hardTtlSec` / `github.cache.enabled` settings. The cache retains rendered Markdown plus the raw JSON payload returned by `gh`, including private bodies, comments, reviews, and review comments when comments are enabled; rows are scoped by the local GitHub credential fingerprint. Root and repo-scoped reads (`issue://`, `pr://owner/repo`) issue a live `gh issue list` / `gh pr list` for browsing; query params `state`, `limit`, `author`, `label` pass through to `gh` (`issue://` accepts `state=open|closed|all`; `pr://` also accepts `merged`). PR diffs ride the same cache under `pr://<N>/diff[/…]`: the listing, full diff, and per-file slices all share one `pr-diff` row keyed by repo and PR number.
 
 ### `pr_create`
 
@@ -135,7 +135,7 @@ Branches:
 
 Worktree and metadata behavior:
 - Local branch name is always `pr-<number>`.
-- Worktree path is `getWorktreeDir("<number>-<repo-hash>")` = `path.join(getWorktreesDir(), "<number>-<repo-hash>")`, where `<number>` is the PR number and `<repo-hash>` is `hashPath(primaryRepoRoot)` (a 7-hex digest of the primary repo root). `getWorktreesDir()` resolves the base in this order: a valid `OMP_WORKTREE_DIR`, the applied `worktree.base` setting, then the profile/XDG-aware data-root default (normally `~/.omp/wt`). Both overrides expand a leading `~` and must resolve to an absolute path; an invalid relative value is ignored and resolution falls through. `resolveAvailableWorktreePath()` appends a `-2`/`-3`… suffix when the resulting path is already registered with git or present on disk.
+- Worktree path is `getWorktreeDir("<number>-<repo-hash>")` = `path.join(getWorktreesDir(), "<number>-<repo-hash>")`, where `<number>` is the PR number and `<repo-hash>` is `hashPath(primaryRepoRoot)` (a 7-hex digest of the primary repo root). `getWorktreesDir()` resolves the base in this order: a valid `OMP_WORKTREE_DIR`, the applied `worktree.base` setting, then the profile/XDG-aware data-root default (normally `~/.omp-cyberstrike/wt`). Both overrides expand a leading `~` and must resolve to an absolute path; an invalid relative value is ignored and resolution falls through. `resolveAvailableWorktreePath()` appends a `-2`/`-3`… suffix when the resulting path is already registered with git or present on disk.
 - Existing worktree detection is by branch ref `refs/heads/pr-<number>` from `git.worktree.list()`.
 - New worktree creation calls `git.worktree.add(repoRoot, finalWorktreePath, localBranch, { signal })` after verifying the path is neither already registered nor already present on disk.
 - For same-repo PRs, remote is `origin`. For cross-repo PRs, the tool resolves a clone URL for the head repo, reuses an existing remote with the same URL when possible, or creates `fork-<owner>` / `fork-<owner>-<n>`.
@@ -143,10 +143,10 @@ Worktree and metadata behavior:
   - `branch.pr-<number>.remote`
   - `branch.pr-<number>.merge`
   - `branch.pr-<number>.pushRemote`
-  - `branch.pr-<number>.ompPrHeadRef`
-  - `branch.pr-<number>.ompPrUrl`
-  - `branch.pr-<number>.ompPrIsCrossRepository`
-  - `branch.pr-<number>.ompPrMaintainerCanModify`
+  - `branch.pr-<number>.omp-cyberstrikePrHeadRef`
+  - `branch.pr-<number>.omp-cyberstrikePrUrl`
+  - `branch.pr-<number>.omp-cyberstrikePrIsCrossRepository`
+  - `branch.pr-<number>.omp-cyberstrikePrMaintainerCanModify`
 - If `refs/heads/pr-<number>` already exists at a different commit, checkout fails unless `force=true`, in which case `git branch --force` resets it to the fetched PR head.
 - If a matching worktree already exists, the tool reuses it and reports `reused: true`.
 
@@ -160,7 +160,7 @@ Worktree and metadata behavior:
 | Batching | None |
 | Output | `# Pushed Pull Request Branch` summary with local branch, remote, remote branch, remote URL, PR URL, and force-with-lease flag. `sourceUrl = prUrl` when known. |
 
-Push target resolution reads the `branch.<name>.ompPrHeadRef`, `pushRemote`/`remote`, `ompPrUrl`, `ompPrMaintainerCanModify`, and `ompPrIsCrossRepository` git-config keys written by `pr_checkout`. If the current checked-out branch matches the target branch, the source ref is `HEAD`; otherwise it pushes `refs/heads/<branch>`. The refspec is `HEAD:refs/heads/<headRef>` or `refs/heads/<branch>:refs/heads/<headRef>`.
+Push target resolution reads the `branch.<name>.omp-cyberstrikePrHeadRef`, `pushRemote`/`remote`, `ompPrUrl`, `ompPrMaintainerCanModify`, and `ompPrIsCrossRepository` git-config keys written by `pr_checkout`. If the current checked-out branch matches the target branch, the source ref is `HEAD`; otherwise it pushes `refs/heads/<branch>`. The refspec is `HEAD:refs/heads/<headRef>` or `refs/heads/<branch>:refs/heads/<headRef>`.
 
 ### `search_issues`
 
@@ -244,7 +244,7 @@ Watch flow:
 ## Side Effects
 - Filesystem
   - `pr_create` may create a temp dir under `os.tmpdir()` named `gh-pr-body-*`, write `body.md`, then remove the dir in `finally`.
-  - `pr_checkout` may create worktree directories named `<pr-number>-<repo-hash>` under the base selected by `OMP_WORKTREE_DIR`, then `worktree.base`, then the profile/XDG-aware default (normally `~/.omp/wt`), and add git worktrees there.
+  - `pr_checkout` may create worktree directories named `<pr-number>-<repo-hash>` under the base selected by `OMP_WORKTREE_DIR`, then `worktree.base`, then the profile/XDG-aware default (normally `~/.omp-cyberstrike/wt`), and add git worktrees there.
   - `run_watch` may write a session artifact with full failed-job logs.
 - Network
   - Every op shells out to `gh`, which then talks to GitHub APIs except `pr_push`.

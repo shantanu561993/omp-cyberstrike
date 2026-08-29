@@ -17,7 +17,7 @@ import {
 describe("SSH control-path budget (#9070)", () => {
 	it("rejects a control dir that overflows sun_path once %C.sock + mux temp bind is added", () => {
 		// A representative macOS named-profile control dir is 60 bytes (the
-		// fork's .omp-cyberstrike root is longer than upstream's .omp); the
+		// fork's .omp-cyberstrike root is longer than upstream's .omp-cyberstrike); the
 		// temporary bind path is 60 + 1 + 63 = 124 >= 104, so it must not fit.
 		const profileDir = "/Users/arthur/.omp-cyberstrike/profiles/upstream/ssh-control";
 		expect(Buffer.byteLength(profileDir)).toBe(60);

@@ -77,8 +77,8 @@ export function getChangelogPath(): string | undefined {
 // =============================================================================
 
 /**
- * User-level: ~/.omp/agent, Claude's active config directory, ~/.codex, ~/.gemini
- * Project-level: .omp, .claude, .codex, .gemini
+ * User-level: ~/.omp-cyberstrike/agent, Claude's active config directory, ~/.codex, ~/.gemini
+ * Project-level: .omp-cyberstrike, .claude, .codex, .gemini
  */
 const USER_CONFIG_BASES = priorityList.map(({ dir, globalAgentDir }) => ({
 	base: () =>
@@ -93,14 +93,14 @@ const PROJECT_CONFIG_BASES = priorityList.map(({ dir }) => ({
 
 export interface ConfigDirEntry {
 	path: string;
-	source: string; // e.g., ".omp", ".claude"
+	source: string; // e.g., ".omp-cyberstrike", ".claude"
 	level: "user" | "project";
 }
 
 export interface GetConfigDirsOptions {
-	/** Include user-level directories (~/.omp/agent/...). Default: true */
+	/** Include user-level directories (~/.omp-cyberstrike/agent/...). Default: true */
 	user?: boolean;
-	/** Include project-level directories (.omp/...). Default: true */
+	/** Include project-level directories (.omp-cyberstrike/...). Default: true */
 	project?: boolean;
 	/** Current working directory for project paths. Default: getProjectDir() */
 	cwd?: string;
@@ -118,7 +118,7 @@ export interface GetConfigDirsOptions {
  * @example
  * // Get all command directories
  * getConfigDirs("commands")
- * // → [{ path: "~/.omp/agent/commands", source: ".omp", level: "user" }, ...]
+ * // → [{ path: "~/.omp-cyberstrike/agent/commands", source: ".omp-cyberstrike", level: "user" }, ...]
  *
  * @example
  * // Get only existing project skill directories
@@ -208,7 +208,7 @@ export function findConfigFileWithMeta(
 
 /**
  * Find all nearest config directories by walking up from cwd.
- * Returns one entry per config base (.omp, .claude) - the nearest one found.
+ * Returns one entry per config base (.omp-cyberstrike, .claude) - the nearest one found.
  * Results are in priority order (highest first).
  */
 export function findAllNearestProjectConfigDirs(subpath: string, cwd: string = getProjectDir()): ConfigDirEntry[] {

@@ -1,5 +1,5 @@
 /**
- * Ownership marker for task-isolation sandboxes under `~/.omp/wt/`.
+ * Ownership marker for task-isolation sandboxes under `~/.omp-cyberstrike/wt/`.
  *
  * Each isolation base dir (`ensureIsolation` in {@link ./worktree}) holds a
  * compact `m` mount plus this marker file naming the omp process that created
@@ -10,7 +10,7 @@ import * as path from "node:path";
 import { $ } from "bun";
 
 /** Marker file written into a task-isolation base dir identifying its owner. */
-export const ISOLATION_OWNER_FILE = ".omp-isolation-owner.json";
+export const ISOLATION_OWNER_FILE = ".omp-cyberstrike-isolation-owner.json";
 
 /** Recorded owner of a task-isolation sandbox. */
 export interface IsolationOwner {

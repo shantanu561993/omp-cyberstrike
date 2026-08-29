@@ -32,7 +32,7 @@ Each subagent MUST:
 ### a. Read
 
 1. Read `issue://<N>`; cross-repo: `issue://<owner>/<repo>/<N>`. Includes body/comments; comments often contain repro/fix hints. Append `?comments=0` only to explicitly skip comments.
-2. Run `gh search prs` for issue number. Reasonable existing PR → review per `.omp/commands/review-prs.md`, report `existing-pr`; do NOT create competing fix.
+2. Run `gh search prs` for issue number. Reasonable existing PR → review per `.omp-cyberstrike/commands/review-prs.md`, report `existing-pr`; do NOT create competing fix.
 
 ### b. Diagnose/reproduce
 
@@ -53,7 +53,7 @@ Confirmed local repro required.
 ```bash
 MAIN="$(git rev-parse --show-toplevel)"
 ENC="$(printf '%s' "$MAIN" | sed 's|[/\\:]|-|g')"
-WT="$HOME/.omp/wt/${ENC}/fix-issue-<N>"
+WT="$HOME/.omp-cyberstrike/wt/${ENC}/fix-issue-<N>"
 
 git -C "$MAIN" fetch origin main
 git -C "$MAIN" worktree add -B "fix/issue-<N>" "$WT" origin/main
@@ -110,7 +110,7 @@ Do NOT push; human pushes/opens PR.
 Issue #<N>  <title>
 Status:    fixed | unreproduced | not-a-bug | existing-pr (#<M>)
 Repro:     <test path inside worktree>            (if applicable)
-Worktree:  ~/.omp/wt/.../fix-issue-<N>            (if created)
+Worktree:  ~/.omp-cyberstrike/wt/.../fix-issue-<N>            (if created)
 Branch:    fix/issue-<N>                          (if created)
 Commits:   <shas + one-liners>                    (if any)
 Notes:     <root cause in one sentence; or what info is missing>

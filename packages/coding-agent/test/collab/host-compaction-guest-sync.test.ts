@@ -140,7 +140,7 @@ async function settleFrames(predicate: () => boolean, timeoutMs = 10_000): Promi
 }
 
 // The guest writes its replica under getConfigRootDir(); redirect the config
-// root to a temp HOME so the test never touches the real ~/.omp.
+// root to a temp HOME so the test never touches the real ~/.omp-cyberstrike.
 let homedirSpy: Mock<typeof os.homedir> | undefined;
 let homeDir: TempDir | undefined;
 let authStorage: AuthStorage;

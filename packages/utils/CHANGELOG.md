@@ -191,7 +191,7 @@
 ### Added
 
 - Added `getSecretPlaceholderKeyPath()`, `getDaemonRuntimeDir()`, `getProviderInFlightRoot()`, and `getMarketplacesRegistryPath()` to resolve secret key, daemon runtime, provider in-flight, and marketplace registry paths under their respective XDG categories (state, data) instead of the config root.
-- Existing installs enabling XDG keep their data: a legacy `~/.omp/agent/secret-placeholder.key` or `~/.omp/marketplaces.json` is copied to its XDG location on first resolution, so persisted transcripts still deobfuscate and added marketplaces survive the move.
+- Existing installs enabling XDG keep their data: a legacy `~/.omp-cyberstrike/agent/secret-placeholder.key` or `~/.omp-cyberstrike/marketplaces.json` is copied to its XDG location on first resolution, so persisted transcripts still deobfuscate and added marketplaces survive the move.
 
 ### Changed
 
@@ -470,7 +470,7 @@
 ### Added
 
 - Added `runtime-install`: shared on-demand runtime dependency support — `ensureRuntimeInstalled()` (locked, idempotent `bun install` of a pinned dependency set into a cache dir) and a multi-root `installRuntimeModuleResolver()`/`resolveRuntimeModule()` for loading those graphs inside compiled binaries (Bun #1763). Extracted from the coding-agent tiny-model worker; now also backs Mnemopi's on-demand fastembed runtime ([#2389](https://github.com/can1357/oh-my-pi/issues/2389))
-- Added `getFastembedRuntimeDir()` (~/.omp/cache/fastembed-runtime) alongside `getFastembedCacheDir()`
+- Added `getFastembedRuntimeDir()` (~/.omp-cyberstrike/cache/fastembed-runtime) alongside `getFastembedCacheDir()`
 
 ## [15.11.4] - 2026-06-12
 
@@ -559,7 +559,7 @@
 
 ### Added
 
-- Added `getFastembedCacheDir` to return the FastEmbed model cache directory under ~/.omp/cache/fastembed
+- Added `getFastembedCacheDir` to return the FastEmbed model cache directory under ~/.omp-cyberstrike/cache/fastembed
 
 ### Fixed
 

@@ -104,7 +104,7 @@ function loadVt() {
 	vtApi ??= import("kitty-vt-wasm").catch((error) => {
 		vtApi = null;
 		throw new Error(
-			`screen emulation needs kitty-vt-wasm — run \`bun install\` in .omp/tools (${error})`,
+			`screen emulation needs kitty-vt-wasm — run \`bun install\` in .omp-cyberstrike/tools (${error})`,
 		);
 	});
 	return vtApi;
@@ -191,7 +191,7 @@ async function loadCanvas() {
 		mod = await import("@napi-rs/canvas");
 	} catch (error) {
 		throw new Error(
-			`shot needs @napi-rs/canvas — run \`bun install\` in .omp/tools (${error})`,
+			`shot needs @napi-rs/canvas — run \`bun install\` in .omp-cyberstrike/tools (${error})`,
 		);
 	}
 	const families = mod.GlobalFonts.families.map((entry) => entry.family);

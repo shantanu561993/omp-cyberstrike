@@ -198,9 +198,9 @@ await flushTelemetryExport();
 // The metric reader exports on its own interval; wait one cycle then flush.
 await Bun.sleep(700);
 await flushTelemetryExport();
-assertSingleMetricPoint("pi.omp.agent.chat.calls");
-assertSingleMetricPoint("pi.omp.agent.tool.calls");
-assertSingleMetricPoint("pi.omp.agent.tool.duration");
+assertSingleMetricPoint("pi.omp-cyberstrike.agent.chat.calls");
+assertSingleMetricPoint("pi.omp-cyberstrike.agent.tool.calls");
+assertSingleMetricPoint("pi.omp-cyberstrike.agent.tool.duration");
 await server.stop(true);
 
 const ok = seen.has("logs") && seen.has("metrics");

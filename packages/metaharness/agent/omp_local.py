@@ -14,7 +14,7 @@ this runs the working tree at `/work/pi`. Install modes (`OMP_BENCH_INSTALL`):
     external deps + the platform native addon, and run `bun .../dist/cli.js`.
   * binary (`--binary`): a self-contained compiled omp binary is uploaded.
 
-Auth never enters the container: a generated `~/.omp/agent/models.yml` routes the
+Auth never enters the container: a generated `~/.omp-cyberstrike/agent/models.yml` routes the
 configured providers' `baseUrl` at the host's pm2 auth-gateway (default
 `http://host.docker.internal:4000`, `transport: pi-native`), so the gateway
 resolves credentials host-side. No provider API keys are passed in.
@@ -235,7 +235,7 @@ class OmpLocal(BaseInstalledAgent):
         # Resolved during install(); reused by version + run commands.
         self._home = "/root"
         self._bun = "/root/.bun/bin/bun"
-        self._cli = "/root/.omp-bench/app/dist/cli.js"
+        self._cli = "/root/.omp-cyberstrike-bench/app/dist/cli.js"
         self._binary_arm64 = _env("OMP_BENCH_BINARY_ARM64")
         self._binary_x64 = _env("OMP_BENCH_BINARY_X64")
         self._binary = bool(self._binary_arm64 or self._binary_x64)
@@ -322,7 +322,7 @@ class OmpLocal(BaseInstalledAgent):
             else:
                 self._cli = await self._install_local(environment)
 
-        # 3) Auth + model config under $HOME/.omp/agent.
+        # 3) Auth + model config under $HOME/.omp-cyberstrike/agent.
         if self._gateway_on:
             # Gateway routing — no provider keys ever enter the container.
             await self._write_models_yaml(environment)
@@ -371,7 +371,7 @@ class OmpLocal(BaseInstalledAgent):
                 "OMP_BENCH_INSTALL=local requires OMP_BENCH_TARBALL (host tarball path)"
             )
         await environment.upload_file(self._tarball, _TARBALL_DST)
-        app = f"{self._home}/.omp-bench/app"
+        app = f"{self._home}/.omp-cyberstrike-bench/app"
         await self.exec_as_agent(
             environment,
             command=self._wrap(
@@ -410,7 +410,7 @@ class OmpLocal(BaseInstalledAgent):
             raise RuntimeError(
                 f"binary mode: no omp binary provided for container arch {arch}"
             )
-        app_dir = f"{self._home}/.omp-bench"
+        app_dir = f"{self._home}/.omp-cyberstrike-bench"
         dst = f"{app_dir}/omp"
         staging = "/tmp/omp-bin"
         await self.exec_as_agent(
@@ -425,7 +425,7 @@ class OmpLocal(BaseInstalledAgent):
         return dst
 
     async def _install_published(self, environment: BaseEnvironment) -> str:
-        app = f"{self._home}/.omp-bench/app"
+        app = f"{self._home}/.omp-cyberstrike-bench/app"
         spec = f"@oh-my-pi/pi-coding-agent@{self._pkg_version}"
         await self.exec_as_agent(
             environment,
@@ -453,8 +453,8 @@ class OmpLocal(BaseInstalledAgent):
         await self.exec_as_agent(
             environment,
             command=(
-                f'mkdir -p "$HOME/.omp/agent"; '
-                f'cp {shlex.quote(staged)} "$HOME/.omp/agent/models.yml"'
+                f'mkdir -p "$HOME/.omp-cyberstrike/agent"; '
+                f'cp {shlex.quote(staged)} "$HOME/.omp-cyberstrike/agent/models.yml"'
             ),
         )
 
@@ -474,7 +474,7 @@ class OmpLocal(BaseInstalledAgent):
         return "\n".join(lines)
 
     async def _write_config(self, environment: BaseEnvironment) -> None:
-        """Write $HOME/.omp/agent/config.yml: the web_search toggle.
+        """Write $HOME/.omp-cyberstrike/agent/config.yml: the web_search toggle.
 
         web_search can't authenticate through the gateway, so it's off by default.
         """
@@ -489,8 +489,8 @@ class OmpLocal(BaseInstalledAgent):
         await self.exec_as_agent(
             environment,
             command=(
-                f'mkdir -p "$HOME/.omp/agent"; '
-                f'cp {shlex.quote(_CONFIG_DST)} "$HOME/.omp/agent/config.yml"'
+                f'mkdir -p "$HOME/.omp-cyberstrike/agent"; '
+                f'cp {shlex.quote(_CONFIG_DST)} "$HOME/.omp-cyberstrike/agent/config.yml"'
             ),
         )
 

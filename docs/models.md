@@ -16,8 +16,8 @@ Primary implementation files:
 
 Default config paths, in precedence order:
 
-- `~/.omp/agent/models.yml`
-- `~/.omp/agent/models.yaml`
+- `~/.omp-cyberstrike/agent/models.yml`
+- `~/.omp-cyberstrike/agent/models.yaml`
 
 Legacy behavior still present:
 
@@ -694,7 +694,7 @@ providers:
 
 ## Legacy consumer caveat
 
-Most model configuration now flows through `models.yml` / `models.yaml` via `ModelRegistry`. Explicit `.json` / `.jsonc` paths remain supported only when passed programmatically to `ModelRegistry`; the default user config prefers `~/.omp/agent/models.yml`, then falls back to `~/.omp/agent/models.yaml`.
+Most model configuration now flows through `models.yml` / `models.yaml` via `ModelRegistry`. Explicit `.json` / `.jsonc` paths remain supported only when passed programmatically to `ModelRegistry`; the default user config prefers `~/.omp-cyberstrike/agent/models.yml`, then falls back to `~/.omp-cyberstrike/agent/models.yaml`.
 
 ## Failure mode
 

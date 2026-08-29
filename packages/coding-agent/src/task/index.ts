@@ -3,8 +3,8 @@
  *
  * Discovers agent definitions from:
  *   - Bundled agents (shipped with omp-coding-agent)
- *   - ~/.omp/agent/agents/*.md (user-level)
- *   - .omp/agents/*.md (project-level)
+ *   - ~/.omp-cyberstrike/agent/agents/*.md (user-level)
+ *   - .omp-cyberstrike/agents/*.md (project-level)
  *
  * Supports:
  *   - Single agent spawn per call (parallelism = parallel task calls)

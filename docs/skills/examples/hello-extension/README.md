@@ -7,17 +7,17 @@ A minimal `oh-my-pi` extension that demonstrates the two most common authoring p
 **Option A — drop into user extensions directory:**
 
 ```
-cp -r . ~/.omp/agent/extensions/hello-extension
+cp -r . ~/.omp-cyberstrike/agent/extensions/hello-extension
 ```
 
 Restart `omp`. You will see the startup notification immediately.
 
-With `omp --profile <name>`, use `~/.omp/profiles/<name>/agent/extensions/hello-extension` instead. `PI_CODING_AGENT_DIR` likewise changes the agent directory.
+With `omp --profile <name>`, use `~/.omp-cyberstrike/profiles/<name>/agent/extensions/hello-extension` instead. `PI_CODING_AGENT_DIR` likewise changes the agent directory.
 
 **Option B — point the settings `extensions` array at it:**
 
 ```yaml
-# ~/.omp/agent/config.yml
+# ~/.omp-cyberstrike/agent/config.yml
 extensions:
   - /path/to/hello-extension
 ```

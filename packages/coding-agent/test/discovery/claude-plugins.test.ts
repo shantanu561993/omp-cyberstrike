@@ -536,7 +536,7 @@ describe("listClaudePluginRoots", () => {
 		expect(result.roots[0].scope).toBe("user");
 	});
 	test("loads rules from OMP marketplace plugins", async () => {
-		const pluginsDir = path.join(tempDir, ".omp", "plugins");
+		const pluginsDir = path.join(tempDir, ".omp-cyberstrike", "plugins");
 		const pluginPath = path.join(tempDir, "plugins", "omp-rules");
 		await Promise.all([
 			fs.mkdir(pluginsDir, { recursive: true }),
@@ -710,7 +710,7 @@ describe("listClaudePluginRoots", () => {
 		const claudePluginPath = path.join(tempDir, "plugins", "claude-pointer");
 		await fs.mkdir(pluginsDir, { recursive: true });
 		await Promise.all([
-			fs.mkdir(path.join(ompPluginPath, ".omp-plugin"), { recursive: true }),
+			fs.mkdir(path.join(ompPluginPath, ".omp-cyberstrike-plugin"), { recursive: true }),
 			fs.mkdir(path.join(ompPluginPath, ".claude-plugin"), { recursive: true }),
 			fs.mkdir(path.join(claudePluginPath, ".claude-plugin"), { recursive: true }),
 		]);
@@ -742,7 +742,7 @@ describe("listClaudePluginRoots", () => {
 		);
 		await Promise.all([
 			fs.writeFile(
-				path.join(ompPluginPath, ".omp-plugin", "plugin.json"),
+				path.join(ompPluginPath, ".omp-cyberstrike-plugin", "plugin.json"),
 				JSON.stringify({ mcpServers: "./mcp-omp.json" }),
 			),
 			fs.writeFile(
@@ -782,7 +782,7 @@ describe("listClaudePluginRoots", () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const pluginPath = path.join(tempDir, "plugins", "inline-mcp");
 		await fs.mkdir(pluginsDir, { recursive: true });
-		await fs.mkdir(path.join(pluginPath, ".omp-plugin"), { recursive: true });
+		await fs.mkdir(path.join(pluginPath, ".omp-cyberstrike-plugin"), { recursive: true });
 		await fs.writeFile(
 			path.join(pluginsDir, "installed_plugins.json"),
 			JSON.stringify({
@@ -803,7 +803,7 @@ describe("listClaudePluginRoots", () => {
 		// Inline object form: the manifest carries the server map directly, and no
 		// root .mcp.json exists, so the pre-fix fallback would register nothing.
 		await fs.writeFile(
-			path.join(pluginPath, ".omp-plugin", "plugin.json"),
+			path.join(pluginPath, ".omp-cyberstrike-plugin", "plugin.json"),
 			JSON.stringify({ mcpServers: { local: { command: "./bin/server", args: ["run"] } } }),
 		);
 
@@ -822,7 +822,7 @@ describe("listClaudePluginRoots", () => {
 		const pluginsDir = path.join(tempDir, ".claude", "plugins");
 		const pluginPath = path.join(tempDir, "plugins", "broken-pointer");
 		await fs.mkdir(pluginsDir, { recursive: true });
-		await fs.mkdir(path.join(pluginPath, ".omp-plugin"), { recursive: true });
+		await fs.mkdir(path.join(pluginPath, ".omp-cyberstrike-plugin"), { recursive: true });
 		await fs.writeFile(
 			path.join(pluginsDir, "installed_plugins.json"),
 			JSON.stringify({
@@ -843,7 +843,7 @@ describe("listClaudePluginRoots", () => {
 		// Pointer names a file the plugin never shipped: discovery must say so
 		// instead of silently registering nothing.
 		await fs.writeFile(
-			path.join(pluginPath, ".omp-plugin", "plugin.json"),
+			path.join(pluginPath, ".omp-cyberstrike-plugin", "plugin.json"),
 			JSON.stringify({ mcpServers: "./mcp-omp.json" }),
 		);
 		await fs.writeFile(path.join(pluginPath, ".mcp.json"), JSON.stringify({ "from-root": { command: "root" } }));

@@ -132,8 +132,8 @@
               }
               self.homeManagerModules.default
               {
-                programs.omp.enable = true;
-                programs.omp.settings.startup.quiet = true;
+                programs.omp-cyberstrike.enable = true;
+                programs.omp-cyberstrike.settings.startup.quiet = true;
               }
             ];
           };
@@ -147,12 +147,12 @@
                 };
               }
               self.nixosModules.default
-              { programs.omp.enable = true; }
+              { programs.omp-cyberstrike.enable = true; }
             ];
           };
           modulesEvaluate =
             assert builtins.elem self.packages.${system}.default homeManagerEvaluation.config.home.packages;
-            assert homeManagerEvaluation.config.home.activation ? ompConfig;
+            assert homeManagerEvaluation.config.home.activation ? omp-cyberstrike-config;
             assert builtins.elem self.packages.${system}.default
               nixosEvaluation.config.environment.systemPackages;
             pkgs.runCommand "omp-module-evaluation" { } "touch $out";
@@ -179,8 +179,8 @@
       };
 
       homeManagerModules.default = import ./nix/home-manager.nix { inherit self; };
-      homeManagerModules.omp = self.homeManagerModules.default;
+      homeManagerModules.omp-cyberstrike = self.homeManagerModules.default;
       nixosModules.default = import ./nix/nixos-module.nix { inherit self; };
-      nixosModules.omp = self.nixosModules.default;
+      nixosModules.omp-cyberstrike = self.nixosModules.default;
     };
 }
