@@ -296,6 +296,14 @@ export class Theme {
 		return `${ansi}${text}\x1b[39m`; // Reset only foreground color
 	}
 
+	/** Apply a foreground, replacing terminal-default tokens with the theme's contrast-safe fallback. */
+	fgResolved(color: ThemeColor, text: string): string {
+		const ansi = this.#fgColors[color];
+		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
+		const resolved = ansi === "\x1b[39m" ? colorToAnsi(this.getColorHex(color), this.mode) : ansi;
+		return `${resolved}${text.replace(FOREGROUND_RESET_PATTERN, `$&${resolved}`)}\x1b[39m`;
+	}
+
 	bg(color: ThemeBg, text: string): string {
 		const ansi = this.#bgColors[color];
 		if (!ansi) throw new Error(`Unknown theme background color: ${color}`);
@@ -512,6 +520,17 @@ export class Theme {
 			teeUp: this.#symbols["boxSharp.teeUp"],
 			teeRight: this.#symbols["boxSharp.teeRight"],
 			teeLeft: this.#symbols["boxSharp.teeLeft"],
+		};
+	}
+
+	/**
+	 * Dotted rules/verticals for transient selection outlines. Corners come from
+	 * {@link boxRound} — Unicode has no rounded dotted corner glyphs.
+	 */
+	get boxDotted() {
+		return {
+			horizontal: this.#symbols["boxDotted.horizontal"],
+			vertical: this.#symbols["boxDotted.vertical"],
 		};
 	}
 

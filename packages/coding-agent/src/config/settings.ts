@@ -39,6 +39,7 @@ import { isLightTheme, setAutoThemeMapping, setColorBlindMode, setSymbolPreset }
 import { AgentStorage } from "../session/agent-storage";
 import { type CompactionMethod, DEFAULT_COMPACTION_METHOD_ORDER } from "../session/compaction-methods";
 import { AUTO_IMAGE_PROVIDER_ORDER, isImageProviderId } from "../tools/image-providers";
+import { applyHyperlinkSetting } from "../tui/hyperlink";
 import { replaceFileAtomically } from "../utils/atomic-file";
 import { type EditMode, normalizeEditMode } from "../utils/edit-mode";
 import { INSPECT_IMAGE_MODES } from "../utils/inspect-image-mode";
@@ -1647,6 +1648,11 @@ export class Settings {
 			raw.steeringMode = raw.queueMode;
 			delete raw.queueMode;
 		}
+		// doubleEscapeAction: "branch"/"tree" -> "rewind". Both legacy actions are
+		// superseded by the in-transcript rewind selector; only "none" survives.
+		if (raw.doubleEscapeAction === "branch" || raw.doubleEscapeAction === "tree") {
+			raw.doubleEscapeAction = "rewind";
+		}
 
 		// lastChangelogVersion moved out of config.yml into the
 		// <agentDir>/last-changelog-version marker file so version bumps no
@@ -2760,6 +2766,11 @@ const SETTING_HOOKS: Partial<Record<SettingPath, SettingHook<any>>> = {
 			});
 		}
 	},
+	// A project-scoped reload (`/move`, cross-project resume, rollback) can change
+	// the effective value; reapply so pi-tui renderers gating on the shared flag
+	// track it the same instant path/resource links do. Runtime `/settings` edits
+	// also go through the selector controller to invalidate and repaint live views.
+	"tui.hyperlinks": value => applyHyperlinkSetting(value),
 	"provider.appendOnlyContext": value => {
 		if (typeof value === "string") {
 			appendOnlyModeSignal.fire(value);

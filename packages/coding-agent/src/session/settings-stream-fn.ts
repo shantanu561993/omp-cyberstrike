@@ -11,75 +11,14 @@
  * and OpenRouter response-cache hits across advisor calls.
  */
 import type { StreamFn } from "@oh-my-pi/pi-agent-core";
-import {
-	type AssistantMessage,
-	type AssistantMessageEventStream,
-	createAssistantMessageEventStream,
-	type SimpleStreamOptions,
-	streamSimple,
-} from "@oh-my-pi/pi-ai";
-import { isAnthropicFableOrMythosModel } from "@oh-my-pi/pi-catalog/identity";
-import { ModelsConfigFile } from "../config/models-config";
+import { type SimpleStreamOptions, streamSimple } from "@oh-my-pi/pi-ai";
+import { classifyModel } from "@oh-my-pi/pi-catalog/identity";
 import { type Settings, validateProviderMaxInFlightRequests } from "../config/settings";
-
-type AssistantMessageEvent = AssistantMessageEventStream extends AsyncIterable<infer TEvent> ? TEvent : never;
 
 function timeoutSecondsToMs(value: number): number | undefined {
 	if (!Number.isFinite(value) || value < 0) return undefined;
 	if (value === 0) return 0;
 	return Math.max(1, Math.trunc(value * 1000));
-}
-
-/** True when the assistant message carries text or a tool call worth acting on. */
-function hasActionableContent(message: AssistantMessage): boolean {
-	return message.content.some(item => {
-		if (item.type === "text") return item.text.trim().length > 0;
-		if (item.type === "toolCall") return true;
-		return false;
-	});
-}
-
-/**
- * Wrap a provider call so a turn that comes back EMPTY (no text, no tool call)
- * is re-issued once with `tool_choice: "required"`. Some self-hosted
- * fine-tunes reason but never volunteer a call under the default `auto`
- * choice; the forced retry makes them act instead of stalling the loop. The
- * first attempt is buffered and only forwarded when usable, so the agent loop
- * always sees one coherent turn — a stalled attempt is discarded wholesale and
- * replaced by the retry, which streams live.
- */
-export function retryEmptyTurnWithForcedToolChoice(
-	callAuto: () => AssistantMessageEventStream | Promise<AssistantMessageEventStream>,
-	callForced: () => AssistantMessageEventStream | Promise<AssistantMessageEventStream>,
-): AssistantMessageEventStream {
-	const out = createAssistantMessageEventStream();
-	void (async () => {
-		const buffered: AssistantMessageEvent[] = [];
-		try {
-			for await (const event of await callAuto()) {
-				if (event.type === "done") {
-					if (hasActionableContent(event.message)) {
-						for (const bufferedEvent of buffered) out.push(bufferedEvent);
-						out.push(event);
-					} else {
-						// Empty turn: discard the buffer, re-issue once with a
-						// forced tool choice and forward the retry as-is.
-						for await (const retryEvent of await callForced()) out.push(retryEvent);
-					}
-					return;
-				}
-				if (event.type === "error") {
-					for (const bufferedEvent of buffered) out.push(bufferedEvent);
-					out.push(event);
-					return;
-				}
-				buffered.push(event);
-			}
-		} catch (err) {
-			out.fail(err);
-		}
-	})();
-	return out;
 }
 
 /**
@@ -115,11 +54,16 @@ export function createSettingsAwareStreamFn(settings: Settings, base: StreamFn =
 		// API, inject the `fallbacks: [{ model: "claude-opus-4-8" }]` chain.
 		// The provider layer picks it up, sends the beta header, and honors
 		// the response signals. Every other model / API is untouched.
-		const serverSideFallbackEnabled =
+		const serverSideFallbackEligible =
 			settings.get("providers.anthropic.serverSideFallback") &&
 			model.api === "anthropic-messages" &&
-			model.provider === "anthropic" &&
-			isAnthropicFableOrMythosModel(model.id);
+			model.provider === "anthropic";
+		const serverSideFallbackIdentity = serverSideFallbackEligible
+			? (model.identity ?? classifyModel(model.provider, model.id ?? "", { lenient: true }))
+			: undefined;
+		const serverSideFallbackEnabled =
+			serverSideFallbackIdentity?.class === "anthropic" &&
+			(serverSideFallbackIdentity.family === "fable" || serverSideFallbackIdentity.family === "mythos");
 		const fallbacks =
 			streamOptions?.fallbacks ?? (serverSideFallbackEnabled ? [{ model: "claude-opus-4-8" }] : undefined);
 		const merged: SimpleStreamOptions = {
@@ -142,17 +86,6 @@ export function createSettingsAwareStreamFn(settings: Settings, base: StreamFn =
 			hideThinkingSummary: streamOptions?.hideThinkingSummary ?? settings.get("omitThinking"),
 			...(fallbacks !== undefined ? { fallbacks } : {}),
 		};
-		const modelsConfig = ModelsConfigFile.tryLoad();
-		const providerConfig = modelsConfig.status === "ok" ? modelsConfig.value?.providers?.[model.provider] : undefined;
-		if (providerConfig?.forceToolChoiceOnEmpty !== true) {
-			return base(model, context, merged);
-		}
-		// Per-provider `forceToolChoiceOnEmpty`: re-issue empty turns once with
-		// a forced tool choice (see retryEmptyTurnWithForcedToolChoice).
-		const call = (options: SimpleStreamOptions) => base(model, context, options);
-		return retryEmptyTurnWithForcedToolChoice(
-			() => call(merged),
-			() => call({ ...merged, toolChoice: "required" }),
-		);
+		return base(model, context, merged);
 	};
 }
