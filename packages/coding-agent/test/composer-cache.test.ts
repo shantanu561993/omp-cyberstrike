@@ -72,7 +72,7 @@ describe("composer startup cache", () => {
 		try {
 			await Promise.all([
 				fs.mkdir(home, { recursive: true }),
-				fs.mkdir(path.join(xdgCache, "omp"), { recursive: true }),
+				fs.mkdir(path.join(xdgCache, "omp-cyberstrike"), { recursive: true }),
 			]);
 			await Bun.write(path.join(home, ".env"), `XDG_CACHE_HOME=${xdgCache}\n`);
 
@@ -83,7 +83,7 @@ describe("composer startup cache", () => {
 				`const project = ${JSON.stringify(project)};`,
 				'await writeComposerWelcomeCache(project, { modelName: "model", providerName: "provider" });',
 				'const key = Bun.hash.wyhash(path.resolve(project)).toString(16).padStart(16, "0");',
-				`const expected = path.join(${JSON.stringify(xdgCache)}, "omp", "cache", "composer", key, "welcome.json");`,
+				`const expected = path.join(${JSON.stringify(xdgCache)}, "omp-cyberstrike", "cache", "composer", key, "welcome.json");`,
 				"process.stdout.write(String(await Bun.file(expected).exists()));",
 			].join("\n");
 			const proc = Bun.spawn([process.execPath, "--no-env-file", "--no-install", "--eval", script], {

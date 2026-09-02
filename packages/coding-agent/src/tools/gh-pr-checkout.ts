@@ -219,12 +219,12 @@ export async function resolvePrBranchPushTarget(
 	const repository = vcs.requireGit(repoRoot);
 	const configPrefix = `branch.${localBranch}.`;
 	const [headRef, pushRemote, remote, prUrl, maintainerCanModifyValue, isCrossRepositoryValue] = await Promise.all([
-		repository.configGet(`${configPrefix}ompPrHeadRef`, signal),
+		repository.configGet(`${configPrefix}omp-cyberstrikePrHeadRef`, signal),
 		repository.configGet(`${configPrefix}pushRemote`, signal),
 		repository.configGet(`${configPrefix}remote`, signal),
-		repository.configGet(`${configPrefix}ompPrUrl`, signal),
-		repository.configGet(`${configPrefix}ompPrMaintainerCanModify`, signal),
-		repository.configGet(`${configPrefix}ompPrIsCrossRepository`, signal),
+		repository.configGet(`${configPrefix}omp-cyberstrikePrUrl`, signal),
+		repository.configGet(`${configPrefix}omp-cyberstrikePrMaintainerCanModify`, signal),
+		repository.configGet(`${configPrefix}omp-cyberstrikePrIsCrossRepository`, signal),
 	]);
 	if (!headRef) {
 		throw new ToolError(`branch ${localBranch} has no PR push metadata; check it out via op: pr_checkout first`);
@@ -469,15 +469,15 @@ export async function checkoutPullRequest(
 			await repository.configSet(`${configPrefix}remote`, remote.name, signal);
 			await repository.configSet(`${configPrefix}merge`, `refs/heads/${headRefName}`, signal);
 			await repository.configSet(`${configPrefix}pushRemote`, remote.name, signal);
-			await repository.configSet(`${configPrefix}ompPrHeadRef`, headRefName, signal);
-			await repository.configSet(`${configPrefix}ompPrUrl`, data.url ?? "", signal);
+			await repository.configSet(`${configPrefix}omp-cyberstrikePrHeadRef`, headRefName, signal);
+			await repository.configSet(`${configPrefix}omp-cyberstrikePrUrl`, data.url ?? "", signal);
 			await repository.configSet(
-				`${configPrefix}ompPrIsCrossRepository`,
+				`${configPrefix}omp-cyberstrikePrIsCrossRepository`,
 				String(Boolean(data.isCrossRepository)),
 				signal,
 			);
 			await repository.configSet(
-				`${configPrefix}ompPrMaintainerCanModify`,
+				`${configPrefix}omp-cyberstrikePrMaintainerCanModify`,
 				String(Boolean(data.maintainerCanModify)),
 				signal,
 			);

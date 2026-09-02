@@ -146,10 +146,10 @@ Worktree and metadata behavior:
   - `branch.pr-<number>.remote`
   - `branch.pr-<number>.merge`
   - `branch.pr-<number>.pushRemote`
-  - `branch.pr-<number>.ompPrHeadRef`
-  - `branch.pr-<number>.ompPrUrl`
-  - `branch.pr-<number>.ompPrIsCrossRepository`
-  - `branch.pr-<number>.ompPrMaintainerCanModify`
+  - `branch.pr-<number>.omp-cyberstrikePrHeadRef`
+  - `branch.pr-<number>.omp-cyberstrikePrUrl`
+  - `branch.pr-<number>.omp-cyberstrikePrIsCrossRepository`
+  - `branch.pr-<number>.omp-cyberstrikePrMaintainerCanModify`
 - If `refs/heads/pr-<number>` already exists at a different commit, checkout fails unless `force=true`, in which case `repository.createBranch(..., force=true)` resets it to the fetched PR head.
 - If a matching worktree already exists, the tool reuses it and reports `reused: true`.
 
@@ -163,7 +163,7 @@ Worktree and metadata behavior:
 | Batching | None |
 | Output | `# Pushed Pull Request Branch` summary with local branch, remote, remote branch, remote URL, PR URL, and force-with-lease flag. `sourceUrl = prUrl` when known. |
 
-Push target resolution reads the `branch.<name>.ompPrHeadRef`, `pushRemote`/`remote`, `ompPrUrl`, `ompPrMaintainerCanModify`, and `ompPrIsCrossRepository` git-config keys written by `pr_checkout`. If the current checked-out branch matches the target branch, the source ref is `HEAD`; otherwise it pushes `refs/heads/<branch>`. The refspec is `HEAD:refs/heads/<headRef>` or `refs/heads/<branch>:refs/heads/<headRef>`.
+Push target resolution reads the `branch.<name>.omp-cyberstrikePrHeadRef`, `pushRemote`/`remote`, `omp-cyberstrikePrUrl`, `omp-cyberstrikePrMaintainerCanModify`, and `omp-cyberstrikePrIsCrossRepository` git-config keys written by `pr_checkout`. If the current checked-out branch matches the target branch, the source ref is `HEAD`; otherwise it pushes `refs/heads/<branch>`. The refspec is `HEAD:refs/heads/<headRef>` or `refs/heads/<branch>:refs/heads/<headRef>`.
 
 ### `search_issues`
 
@@ -293,7 +293,7 @@ Watch flow:
   - invalid `run` format
   - `fill` combined with `title` or `body`
   - missing git repo / branch / HEAD context for checkout, push, or watch
-  - `pr_push` on a branch without `ompPrHeadRef` metadata
+  - `pr_push` on a branch without `omp-cyberstrikePrHeadRef` metadata
   - conflicting existing worktree path or branch without `force`
   - an absolute `file_read` path (a leading `/`)
 - `run_watch` treats failed-job log fetches specially: missing log content does not fail the watch; it marks that log `available: false` and prints `Log tail unavailable.` / `Full log unavailable.`.

@@ -157,7 +157,7 @@ describe("plugin config", () => {
 				settings: {},
 			}),
 		);
-		const projectPluginsDir = path.join(tmpRoot, ".omp", "plugins");
+		const projectPluginsDir = path.join(tmpRoot, ".omp-cyberstrike", "plugins");
 		const projectInstallPath = path.join(tmpRoot, "project-cache", pluginName);
 		const projectPluginPath = path.join(projectPluginsDir, "node_modules", pluginName);
 		await Bun.write(

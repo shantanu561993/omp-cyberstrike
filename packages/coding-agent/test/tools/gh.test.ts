@@ -1279,8 +1279,8 @@ echo ok
 			// Both PR URLs persisted to git config (single read instead of two).
 			// `--get-regexp` echoes variable names in git's canonical lowercase.
 			const prUrls = runGit(fixture.repoRoot, ["config", "--get-regexp", "^branch\\.pr-.*\\.omp-cyberstrikeprurl$"]);
-			expect(prUrls).toContain("branch.pr-100.ompprurl https://github.com/owner/repo/pull/100");
-			expect(prUrls).toContain("branch.pr-200.ompprurl https://github.com/owner/repo/pull/200");
+			expect(prUrls).toContain("branch.pr-100.omp-cyberstrikeprurl https://github.com/owner/repo/pull/100");
+			expect(prUrls).toContain("branch.pr-200.omp-cyberstrikeprurl https://github.com/owner/repo/pull/200");
 
 			const summaries = result.details?.checkouts;
 			expect(summaries?.length).toBe(2);
